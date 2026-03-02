@@ -14,6 +14,7 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
   - explicit subscribe APIs for both sync and async callback styles
 - Optional coroutine support (`co_await`) through future awaitables.
 - JetStream wrappers (context, publish, push/pull subscriptions).
+- KeyValue wrappers (open bucket, put/get/delete entries).
 - Trace propagation helpers using NATS headers (`TraceCarrier` concept).
 - Graceful JetStream fallback when linked `nats.c` does not expose JetStream symbols.
 
@@ -99,6 +100,20 @@ JetStream examples are available in:
 
 If JetStream symbols are unavailable in your linked `nats.c`, APIs throw `natscpp::jetstream_not_available`.
 
+
+## KeyValue
+
+```cpp
+#include <natscpp/kv.hpp>
+
+natscpp::connection nc;
+natscpp::key_value kv(nc, "profiles");
+
+kv.put("user-1", R"({"name":"Ada"})");
+auto entry = kv.get("user-1");
+kv.erase("user-1");
+```
+
 ## Trace propagation
 
 ```cpp
@@ -129,6 +144,7 @@ natscpp::extract_trace_context(carrier, keys, extracted);
 - `#include <natscpp/message.hpp>`
 - `#include <natscpp/subscription.hpp>`
 - `#include <natscpp/jetstream.hpp>`
+- `#include <natscpp/kv.hpp>`
 - `#include <natscpp/trace.hpp>`
 
 ## Notes
