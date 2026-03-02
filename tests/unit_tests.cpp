@@ -99,6 +99,7 @@ void test_jetstream_and_consumers_move_semantics_on_empty_handles() {
 
 void test_connection_has_sync_and_async_apis() {
   natscpp::connection nc;
+  natscpp::jetstream js;
 
   static_assert(requires { nc.subscribe_sync("subj"); });
   static_assert(requires { nc.subscribe_queue_sync("subj", "workers"); });
@@ -109,6 +110,15 @@ void test_connection_has_sync_and_async_apis() {
   static_assert(requires { nc.request_sync("svc", "payload"); });
   static_assert(requires { nc.request_async("svc", "payload"); });
   static_assert(requires { natscpp::key_value(nc, "bucket"); });
+  static_assert(requires {
+    js.create_stream(natscpp::js_stream_config{.name = "ORDERS", .subjects = {"orders.>"}});
+  });
+  static_assert(requires {
+    js.create_consumer_group(natscpp::js_consumer_config{.stream = "ORDERS", .durable_name = "orders-pull"});
+  });
+  static_assert(requires {
+    js.push_subscribe("orders.created", "orders-push");
+  });
 }
 
 void test_connection_sync_and_async_roundtrip_if_server_available() {

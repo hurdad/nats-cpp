@@ -11,6 +11,14 @@ int main() {
   constexpr auto subject = "demo.js.sync.events";
   constexpr auto durable = "demo-js-sync-worker";
 
+  [[maybe_unused]] auto stream = js.create_stream({.name = "DEMO_JS_SYNC", .subjects = {"demo.js.sync.>"}});
+  [[maybe_unused]] auto consumer_group = js.create_consumer_group({
+      .stream = "DEMO_JS_SYNC",
+      .durable_name = durable,
+      .filter_subject = subject,
+      .type = natscpp::js_consumer_type::pull,
+  });
+
   auto consumer = js.pull_subscribe(subject, durable);
   js.publish(subject, "hello-jetstream-sync");
 

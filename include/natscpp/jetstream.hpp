@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <natscpp/connection.hpp>
 #include <natscpp/error.hpp>
@@ -56,6 +57,39 @@ inline void destroy_js_context(void* ctx) {
 struct js_publish_options {
   std::string msg_id{};
   std::string expected_stream{};
+};
+
+enum class js_consumer_type {
+  pull,
+  push,
+};
+
+struct js_stream_config {
+  std::string name;
+  std::vector<std::string> subjects;
+};
+
+struct js_consumer_config {
+  std::string stream;
+  std::string durable_name;
+  std::string filter_subject;
+  std::string deliver_subject;
+  std::string deliver_group;
+  js_consumer_type type{js_consumer_type::pull};
+};
+
+/**
+ * @brief High-level stream metadata.
+ */
+struct stream_info {
+  std::string name;
+};
+
+/**
+ * @brief High-level consumer metadata.
+ */
+struct consumer_info {
+  std::string durable_name;
 };
 
 /**
@@ -194,7 +228,7 @@ class jetstream {
     return js_pull_consumer{sub};
   }
 
-  [[nodiscard]] js_push_consumer subscribe(std::string_view stream_subject, std::string_view durable_name) {
+  [[nodiscard]] js_push_consumer push_subscribe(std::string_view stream_subject, std::string_view durable_name) {
     using sub_fn = natsStatus (*)(void**, void*, const char*, const char*, void*, void*);
     auto* fn = reinterpret_cast<sub_fn>(detail::resolve_symbol("js_Subscribe"));
     if (fn == nullptr) {
@@ -207,22 +241,84 @@ class jetstream {
     return js_push_consumer{sub};
   }
 
+  [[nodiscard]] js_push_consumer subscribe(std::string_view stream_subject, std::string_view durable_name) {
+    return push_subscribe(stream_subject, durable_name);
+  }
+
+  [[nodiscard]] stream_info create_stream(const js_stream_config& config) {
+    using add_stream_fn = natsStatus (*)(void**, void*, jsStreamConfig*, void*, void*);
+    auto* fn = reinterpret_cast<add_stream_fn>(detail::resolve_symbol("js_AddStream"));
+    if (fn == nullptr) {
+      throw jetstream_not_available();
+    }
+
+    if (config.name.empty()) {
+      throw std::invalid_argument("stream name cannot be empty");
+    }
+
+    std::vector<const char*> subjects;
+    subjects.reserve(config.subjects.size());
+    for (const auto& subject : config.subjects) {
+      subjects.push_back(subject.c_str());
+    }
+
+    jsStreamConfig stream_config{};
+    stream_config.Name = config.name.c_str();
+    stream_config.Subjects = subjects.empty() ? nullptr : subjects.data();
+    stream_config.SubjectsLen = static_cast<int>(subjects.size());
+
+    void* stream_info_raw{};
+    throw_on_error(fn(&stream_info_raw, ctx_, &stream_config, nullptr, nullptr), "js_AddStream");
+
+    using stream_destroy_fn = void (*)(void*);
+    if (auto* destroy = reinterpret_cast<stream_destroy_fn>(detail::resolve_symbol("jsStreamInfo_Destroy"));
+        destroy != nullptr && stream_info_raw != nullptr) {
+      destroy(stream_info_raw);
+    }
+
+    return stream_info{.name = config.name};
+  }
+
+  [[nodiscard]] consumer_info create_consumer_group(const js_consumer_config& config) {
+    using add_consumer_fn = natsStatus (*)(void**, void*, const char*, jsConsumerConfig*, void*, void*);
+    auto* fn = reinterpret_cast<add_consumer_fn>(detail::resolve_symbol("js_AddConsumer"));
+    if (fn == nullptr) {
+      throw jetstream_not_available();
+    }
+
+    if (config.stream.empty()) {
+      throw std::invalid_argument("consumer stream cannot be empty");
+    }
+    if (config.durable_name.empty()) {
+      throw std::invalid_argument("consumer durable name cannot be empty");
+    }
+    if (config.type == js_consumer_type::push && config.deliver_subject.empty()) {
+      throw std::invalid_argument("push consumer requires deliver_subject");
+    }
+
+    jsConsumerConfig consumer_config{};
+    consumer_config.Durable = config.durable_name.c_str();
+    consumer_config.FilterSubject = config.filter_subject.empty() ? nullptr : config.filter_subject.c_str();
+    if (config.type == js_consumer_type::push) {
+      consumer_config.DeliverSubject = config.deliver_subject.c_str();
+      consumer_config.DeliverGroup = config.deliver_group.empty() ? nullptr : config.deliver_group.c_str();
+    }
+
+    void* consumer_info_raw{};
+    throw_on_error(fn(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr, nullptr),
+                   "js_AddConsumer");
+
+    using consumer_destroy_fn = void (*)(void*);
+    if (auto* destroy = reinterpret_cast<consumer_destroy_fn>(detail::resolve_symbol("jsConsumerInfo_Destroy"));
+        destroy != nullptr && consumer_info_raw != nullptr) {
+      destroy(consumer_info_raw);
+    }
+
+    return consumer_info{.durable_name = config.durable_name};
+  }
+
  private:
   void* ctx_{};
-};
-
-/**
- * @brief High-level stream metadata.
- */
-struct stream_info {
-  std::string name;
-};
-
-/**
- * @brief High-level consumer metadata.
- */
-struct consumer_info {
-  std::string durable_name;
 };
 
 }  // namespace natscpp
