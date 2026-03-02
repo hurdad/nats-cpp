@@ -21,8 +21,8 @@ class future_awaitable {
   }
 
   void await_suspend(std::coroutine_handle<> h) {
-    std::thread([this, h]() mutable {
-      fut_.wait();
+    std::thread([fut = std::move(fut_), h]() mutable {
+      fut.wait();
       h.resume();
     }).detach();
   }

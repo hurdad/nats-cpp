@@ -3,6 +3,7 @@
 #include <nats/nats.h>
 
 #include <chrono>
+#include <cstdio>
 #include <functional>
 #include <future>
 #include <memory>
@@ -90,7 +91,14 @@ class connection {
           natsMsg* dup{};
           if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
                              natsMsg_GetDataLength(msg)) == NATS_OK) {
-            (*fn)(message{dup});
+            try {
+              (*fn)(message{dup});
+            } catch (...) {
+              std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
+            }
+          } else {
+            std::fprintf(stderr, "[natscpp] natsMsg_Create failed: dropping message on subject '%s'\n",
+                         natsMsg_GetSubject(msg));
           }
         },
         token.get());
@@ -126,7 +134,14 @@ class connection {
           natsMsg* dup{};
           if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
                              natsMsg_GetDataLength(msg)) == NATS_OK) {
-            (*fn)(message{dup});
+            try {
+              (*fn)(message{dup});
+            } catch (...) {
+              std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
+            }
+          } else {
+            std::fprintf(stderr, "[natscpp] natsMsg_Create failed: dropping message on subject '%s'\n",
+                         natsMsg_GetSubject(msg));
           }
         },
         token.get());

@@ -3,6 +3,7 @@
 #include <nats/nats.h>
 
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,7 +28,11 @@ namespace detail {
 inline void* resolve_kv_symbol(const char* name) {
 #if defined(_WIN32)
   auto module = GetModuleHandleA(nullptr);
-  return reinterpret_cast<void*>(GetProcAddress(module, name));
+  FARPROC proc = GetProcAddress(module, name);
+  void* result = nullptr;
+  static_assert(sizeof(FARPROC) == sizeof(void*), "FARPROC and void* must be the same size");
+  std::memcpy(&result, &proc, sizeof(result));
+  return result;
 #else
   return dlsym(RTLD_DEFAULT, name);
 #endif

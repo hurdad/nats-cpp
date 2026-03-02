@@ -17,7 +17,12 @@ target_include_directories(natscpp
 
 set(NATS_C_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nats.c")
 
+include(CTest)
+
 if(EXISTS "${NATS_C_SOURCE_DIR}/CMakeLists.txt")
+  # Save the user's BUILD_TESTING preference before nats.c forces it off.
+  set(_natscpp_build_testing "${BUILD_TESTING}")
+
   set(NATS_BUILD_LIB_SHARED OFF CACHE BOOL "" FORCE)
   set(NATS_BUILD_LIB_STATIC ON CACHE BOOL "" FORCE)
   set(NATS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -28,6 +33,9 @@ if(EXISTS "${NATS_C_SOURCE_DIR}/CMakeLists.txt")
 
   add_subdirectory("${NATS_C_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/third_party/nats.c")
   target_link_libraries(natscpp INTERFACE nats_static)
+
+  # Restore the user's preference now that the nats.c subdir is done.
+  set(BUILD_TESTING "${_natscpp_build_testing}" CACHE BOOL "" FORCE)
 else()
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)
@@ -42,9 +50,6 @@ else()
       "or install system libnats (pkg-config package: libnats).")
   endif()
 endif()
-
-
-include(CTest)
 
 if(BUILD_TESTING)
   add_executable(natscpp_unit_tests tests/unit_tests.cpp)
