@@ -33,6 +33,9 @@ if(EXISTS "${NATS_C_SOURCE_DIR}/CMakeLists.txt")
 
   add_subdirectory("${NATS_C_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/third_party/nats.c")
   target_link_libraries(natscpp INTERFACE nats_static)
+  target_include_directories(natscpp
+    INTERFACE
+      $<BUILD_INTERFACE:${NATS_C_SOURCE_DIR}/src>)
 
   # Restore the user's preference now that the nats.c subdir is done.
   set(BUILD_TESTING "${_natscpp_build_testing}" CACHE BOOL "" FORCE)
