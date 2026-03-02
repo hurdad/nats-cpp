@@ -60,8 +60,10 @@ When `NATSCPP_BUILD_EXAMPLES=ON` (default), the following example targets are bu
 - `natscpp_sync_example`
 - `natscpp_async_example`
 - `natscpp_request_reply_example`
-- `natscpp_jetstream_sync_example`
-- `natscpp_jetstream_async_example`
+- `natscpp_jetstream_sync_pull_example`
+- `natscpp_jetstream_sync_push_example`
+- `natscpp_jetstream_async_pull_example`
+- `natscpp_jetstream_async_push_example`
 - `natscpp_kv_example`
 
 ## Sync API example
@@ -131,8 +133,10 @@ auto msg = pull.next(std::chrono::seconds(1));
 ```
 
 JetStream examples are available in:
-- `examples/jetstream_sync_example.cpp`
-- `examples/jetstream_async_example.cpp`
+- `examples/jetstream_sync_pull_example.cpp`
+- `examples/jetstream_sync_push_example.cpp`
+- `examples/jetstream_async_pull_example.cpp`
+- `examples/jetstream_async_push_example.cpp`
 
 
 If JetStream symbols are unavailable in your linked `nats.c`, APIs throw `natscpp::jetstream_not_available`.

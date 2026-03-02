@@ -69,11 +69,17 @@ if(NATSCPP_BUILD_EXAMPLES)
   add_executable(natscpp_async_example examples/async_example.cpp)
   target_link_libraries(natscpp_async_example PRIVATE natscpp::natscpp)
 
-  add_executable(natscpp_jetstream_sync_example examples/jetstream_sync_example.cpp)
-  target_link_libraries(natscpp_jetstream_sync_example PRIVATE natscpp::natscpp)
+  add_executable(natscpp_jetstream_sync_pull_example examples/jetstream_sync_pull_example.cpp)
+  target_link_libraries(natscpp_jetstream_sync_pull_example PRIVATE natscpp::natscpp)
 
-  add_executable(natscpp_jetstream_async_example examples/jetstream_async_example.cpp)
-  target_link_libraries(natscpp_jetstream_async_example PRIVATE natscpp::natscpp)
+  add_executable(natscpp_jetstream_sync_push_example examples/jetstream_sync_push_example.cpp)
+  target_link_libraries(natscpp_jetstream_sync_push_example PRIVATE natscpp::natscpp)
+
+  add_executable(natscpp_jetstream_async_pull_example examples/jetstream_async_pull_example.cpp)
+  target_link_libraries(natscpp_jetstream_async_pull_example PRIVATE natscpp::natscpp)
+
+  add_executable(natscpp_jetstream_async_push_example examples/jetstream_async_push_example.cpp)
+  target_link_libraries(natscpp_jetstream_async_push_example PRIVATE natscpp::natscpp)
 
   add_executable(natscpp_kv_example examples/kv_example.cpp)
   target_link_libraries(natscpp_kv_example PRIVATE natscpp::natscpp)
