@@ -42,7 +42,13 @@ void test_message_accessors_and_headers() {
   assert(msg.data() == "hello");
 
   msg.set_header("x-test", "v1");
+  msg.add_header("x-test", "v2");
   assert(msg.header("x-test") == "v1");
+  const auto values = msg.header_values("x-test");
+  assert(values.size() == 2);
+  const auto keys = msg.header_keys();
+  assert(!keys.empty());
+  msg.delete_header("x-test");
   assert(msg.header("missing").empty());
 }
 
@@ -120,6 +126,28 @@ void test_connection_has_sync_and_async_apis() {
   natscpp::jetstream js;
 
   static_assert(requires { nc.subscribe_sync("subj"); });
+  static_assert(requires { nc.flush(std::chrono::milliseconds(10)); });
+  static_assert(requires { nc.flush(); });
+  static_assert(requires { nc.is_closed(); });
+  static_assert(requires { nc.is_reconnecting(); });
+  static_assert(requires { nc.is_draining(); });
+  static_assert(requires { nc.status(); });
+  static_assert(requires { nc.buffered_bytes(); });
+  static_assert(requires { nc.max_payload(); });
+  static_assert(requires { nc.get_statistics(); });
+  static_assert(requires { nc.connected_url(); });
+  static_assert(requires { nc.connected_server_id(); });
+  static_assert(requires { nc.servers(); });
+  static_assert(requires { nc.discovered_servers(); });
+  static_assert(requires { nc.last_error(); });
+  static_assert(requires { nc.client_id(); });
+  static_assert(requires { nc.client_ip(); });
+  static_assert(requires { nc.rtt(); });
+  static_assert(requires { nc.has_header_support(); });
+  static_assert(requires { nc.local_ip_and_port(); });
+  static_assert(requires { nc.publish_string("subj", "payload"); });
+  static_assert(requires { nc.publish_request("subj", "reply", "payload"); });
+  static_assert(requires { nc.publish_request_string("subj", "reply", "payload"); });
   static_assert(requires { nc.subscribe_queue_sync("subj", "workers"); });
   static_assert(requires(std::function<void(natscpp::message)> fn) { nc.subscribe_async("subj", fn); });
   static_assert(requires(std::function<void(natscpp::message)> fn) {
@@ -128,6 +156,8 @@ void test_connection_has_sync_and_async_apis() {
   static_assert(requires { nc.request_sync("svc", "payload"); });
   static_assert(requires { nc.request_async("svc", "payload"); });
   static_assert(requires { natscpp::key_value(nc, "bucket"); });
+  static_assert(requires { natscpp::key_value::create(nc, "bucket"); });
+  static_assert(requires { natscpp::key_value::delete_bucket(nc, "bucket"); });
   static_assert(requires {
     js.create_stream(natscpp::js_stream_config{.name = "ORDERS", .subjects = {"orders.>"}});
   });
@@ -137,6 +167,45 @@ void test_connection_has_sync_and_async_apis() {
   static_assert(requires {
     js.push_subscribe("orders.created", "orders-push");
   });
+}
+
+void test_kv_bucket_and_key_crud_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping kv checks (NATS server unavailable)\n";
+    return;
+  }
+
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string bucket = "NATSCPP_KV_" + ts;
+  const std::string key = "user-1";
+
+  auto kv = natscpp::key_value::create(nc, bucket);
+  assert(kv.valid());
+  assert(kv.bucket() == bucket);
+
+  auto r1 = kv.create(key, "v1");
+  auto e1 = kv.get(key);
+  assert(e1.key() == key);
+  assert(e1.value() == "v1");
+  assert(e1.bucket() == bucket);
+
+  auto r2 = kv.update(key, "v2", r1);
+  assert(r2 > r1);
+  auto e2 = kv.get_revision(key, r1);
+  assert(e2.value() == "v1");
+
+  auto ks = kv.keys();
+  assert(!ks.empty());
+
+  auto st = kv.status();
+  assert(st.bucket == bucket);
+  assert(st.values >= 1);
+
+  kv.purge(key);
+  natscpp::key_value::delete_bucket(nc, bucket);
 }
 
 void test_connection_sync_and_async_roundtrip_if_server_available() {
@@ -153,10 +222,34 @@ void test_connection_sync_and_async_roundtrip_if_server_available() {
   const std::string async_subject = "natscpp.test.async." + ts;
   const std::string rpc_subject = "natscpp.test.rpc." + ts;
 
+  nc.flush();
+  nc.flush(std::chrono::milliseconds(250));
+  (void)nc.buffered_bytes();
+  (void)nc.max_payload();
+  (void)nc.get_statistics();
+  (void)nc.connected_url();
+  (void)nc.connected_server_id();
+  (void)nc.servers();
+  (void)nc.discovered_servers();
+  (void)nc.last_error();
+  (void)nc.has_header_support();
+  (void)nc.local_ip_and_port();
   auto sync_sub = nc.subscribe_sync(sync_subject);
   nc.publish(sync_subject, "hello-sync");
   auto sync_msg = sync_sub.next_message(std::chrono::seconds(2));
   assert(sync_msg.data() == "hello-sync");
+  sync_sub.auto_unsubscribe(100);
+  (void)sync_sub.id();
+  (void)sync_sub.subject();
+  (void)sync_sub.queued_messages();
+  sync_sub.set_pending_limits(1000, 1024 * 1024);
+  (void)sync_sub.get_pending_limits();
+  (void)sync_sub.pending();
+  (void)sync_sub.delivered();
+  (void)sync_sub.dropped();
+  (void)sync_sub.max_pending();
+  sync_sub.clear_max_pending();
+  (void)sync_sub.get_stats();
 
   std::promise<std::string> async_data;
   auto async_sub = nc.subscribe_async(async_subject, [&async_data](natscpp::message msg) {
@@ -191,5 +284,6 @@ int main() {
   test_subscription_release_callback_lifecycle();
   test_connection_has_sync_and_async_apis();
   test_connection_sync_and_async_roundtrip_if_server_available();
+  test_kv_bucket_and_key_crud_if_server_available();
   return 0;
 }
