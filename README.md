@@ -11,6 +11,7 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
   - publish / subscribe
   - queue-group subscriptions
   - request/reply (sync + async)
+  - explicit subscribe APIs for both sync and async callback styles
 - Optional coroutine support (`co_await`) through future awaitables.
 - JetStream wrappers (context, publish, push/pull subscriptions).
 - Trace propagation helpers using NATS headers (`TraceCarrier` concept).
@@ -37,7 +38,7 @@ add_subdirectory(path/to/natscpp)
 target_link_libraries(app PRIVATE natscpp::natscpp)
 ```
 
-## Basic usage
+## Sync API example
 
 ```cpp
 #include <chrono>
@@ -46,25 +47,38 @@ target_link_libraries(app PRIVATE natscpp::natscpp)
 int main() {
   natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
 
-  auto sub = nc.subscribe_sync("demo.events");
-  nc.publish("demo.events", "hello");
+  auto sub = nc.subscribe_sync("demo.sync.events");
+  nc.publish("demo.sync.events", "hello");
 
   auto msg = sub.next_message(std::chrono::seconds(1));
-  return msg.data() == "hello" ? 0 : 1;
+  auto reply = nc.request_sync("svc.echo", "ping");
+  return (msg.data() == "hello" && reply.data() == "ping") ? 0 : 1;
 }
 ```
 
-## Request / reply
+## Async API example
 
 ```cpp
+#include <chrono>
 #include <natscpp/connection.hpp>
 
 natscpp::connection nc;
-auto reply = nc.request("svc.echo", "ping");
+auto sub = nc.subscribe_async("demo.async.events", [](natscpp::message msg) {
+  // callback invoked by nats.c dispatcher thread
+});
 
-auto fut = nc.request_async("svc.echo", "ping async");
+nc.publish("demo.async.events", "hello async");
+auto fut = nc.request_async("svc.echo", "ping async", std::chrono::seconds(2));
 auto async_reply = fut.get();
+sub.unsubscribe();
 ```
+
+## API mapping
+
+- Synchronous subscribe: `subscribe_sync`, `subscribe_queue_sync`
+- Asynchronous callback subscribe: `subscribe_async`, `subscribe_queue_async`
+- Synchronous request/reply: `request_sync` (alias: `request`)
+- Asynchronous request/reply: `request_async`, `request_awaitable`
 
 ## JetStream
 

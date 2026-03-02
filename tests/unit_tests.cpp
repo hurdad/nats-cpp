@@ -4,8 +4,13 @@
 #include <natscpp/message.hpp>
 
 #include <cassert>
+#include <chrono>
+#include <functional>
 #include <future>
+#include <iostream>
 #include <string>
+
+#include <natscpp/connection.hpp>
 
 namespace {
 
@@ -79,6 +84,60 @@ void test_jetstream_and_consumers_move_semantics_on_empty_handles() {
   assert(!push_assigned.valid());
 }
 
+void test_connection_has_sync_and_async_apis() {
+  natscpp::connection nc;
+
+  static_assert(requires { nc.subscribe_sync("subj"); });
+  static_assert(requires { nc.subscribe_queue_sync("subj", "workers"); });
+  static_assert(requires(std::function<void(natscpp::message)> fn) { nc.subscribe_async("subj", fn); });
+  static_assert(requires(std::function<void(natscpp::message)> fn) {
+    nc.subscribe_queue_async("subj", "workers", fn);
+  });
+  static_assert(requires { nc.request_sync("svc", "payload"); });
+  static_assert(requires { nc.request_async("svc", "payload"); });
+}
+
+void test_connection_sync_and_async_roundtrip_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping connection integration checks (NATS server unavailable)\n";
+    return;
+  }
+
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string sync_subject = "natscpp.test.sync." + ts;
+  const std::string async_subject = "natscpp.test.async." + ts;
+  const std::string rpc_subject = "natscpp.test.rpc." + ts;
+
+  auto sync_sub = nc.subscribe_sync(sync_subject);
+  nc.publish(sync_subject, "hello-sync");
+  auto sync_msg = sync_sub.next_message(std::chrono::seconds(2));
+  assert(sync_msg.data() == "hello-sync");
+
+  std::promise<std::string> async_data;
+  auto async_sub = nc.subscribe_async(async_subject, [&async_data](natscpp::message msg) {
+    async_data.set_value(std::string(msg.data()));
+  });
+  nc.publish(async_subject, "hello-async");
+  assert(async_data.get_future().get() == "hello-async");
+  async_sub.unsubscribe();
+
+  auto responder = nc.subscribe_async(rpc_subject, [&nc](natscpp::message msg) {
+    if (!msg.reply_to().empty()) {
+      nc.publish(msg.reply_to(), msg.data());
+    }
+  });
+
+  auto sync_reply = nc.request_sync(rpc_subject, "rpc-sync", std::chrono::seconds(2));
+  assert(sync_reply.data() == "rpc-sync");
+
+  auto async_reply = nc.request_async(rpc_subject, "rpc-async", std::chrono::seconds(2)).get();
+  assert(async_reply.data() == "rpc-async");
+  responder.unsubscribe();
+}
+
 }  // namespace
 
 int main() {
@@ -87,5 +146,7 @@ int main() {
   test_message_accessors_and_headers();
   test_future_awaitable_ready_and_resume();
   test_jetstream_and_consumers_move_semantics_on_empty_handles();
+  test_connection_has_sync_and_async_apis();
+  test_connection_sync_and_async_roundtrip_if_server_available();
   return 0;
 }
