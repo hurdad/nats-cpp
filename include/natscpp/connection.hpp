@@ -76,10 +76,11 @@ class connection {
                                                   std::function<void(message)> handler) {
     natsSubscription* raw{};
     auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
+    auto callbacks_state = callback_state_;
 
     {
-      std::lock_guard<std::mutex> lock(callback_mutex_);
-      callbacks_[token.get()] = token;
+      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
+      callbacks_state->callbacks[token.get()] = token;
     }
 
     natsStatus status = natsConnection_QueueSubscribe(
@@ -95,21 +96,27 @@ class connection {
         token.get());
 
     if (status != NATS_OK) {
-      std::lock_guard<std::mutex> lock(callback_mutex_);
-      callbacks_.erase(token.get());
+      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
+      callbacks_state->callbacks.erase(token.get());
       throw_on_error(status, "natsConnection_QueueSubscribe");
     }
 
-    return subscription{raw};
+    return subscription{raw, [callbacks_state = std::weak_ptr<callback_state>(callbacks_state), key = token.get()] {
+      if (const auto locked = callbacks_state.lock()) {
+        std::lock_guard<std::mutex> lock(locked->mutex);
+        locked->callbacks.erase(key);
+      }
+    }};
   }
 
   [[nodiscard]] subscription subscribe_async(std::string_view subject, std::function<void(message)> handler) {
     natsSubscription* raw{};
     auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
+    auto callbacks_state = callback_state_;
 
     {
-      std::lock_guard<std::mutex> lock(callback_mutex_);
-      callbacks_[token.get()] = token;
+      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
+      callbacks_state->callbacks[token.get()] = token;
     }
 
     natsStatus status = natsConnection_Subscribe(
@@ -125,12 +132,17 @@ class connection {
         token.get());
 
     if (status != NATS_OK) {
-      std::lock_guard<std::mutex> lock(callback_mutex_);
-      callbacks_.erase(token.get());
+      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
+      callbacks_state->callbacks.erase(token.get());
       throw_on_error(status, "natsConnection_Subscribe");
     }
 
-    return subscription{raw};
+    return subscription{raw, [callbacks_state = std::weak_ptr<callback_state>(callbacks_state), key = token.get()] {
+      if (const auto locked = callbacks_state.lock()) {
+        std::lock_guard<std::mutex> lock(locked->mutex);
+        locked->callbacks.erase(key);
+      }
+    }};
   }
 
   [[nodiscard]] subscription subscribe(std::string_view subject, std::function<void(message)> handler) {
@@ -180,9 +192,13 @@ class connection {
   }
 
  private:
+  struct callback_state {
+    std::unordered_map<void*, std::shared_ptr<std::function<void(message)>>> callbacks;
+    std::mutex mutex;
+  };
+
   std::unique_ptr<natsConnection, detail::connection_deleter> conn_;
-  std::unordered_map<void*, std::shared_ptr<std::function<void(message)>>> callbacks_;
-  std::mutex callback_mutex_;
+  std::shared_ptr<callback_state> callback_state_ = std::make_shared<callback_state>();
 };
 
 }  // namespace natscpp

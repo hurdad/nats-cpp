@@ -97,6 +97,24 @@ void test_jetstream_and_consumers_move_semantics_on_empty_handles() {
   assert(!kv_assigned.valid());
 }
 
+
+void test_subscription_release_callback_lifecycle() {
+  int release_count = 0;
+
+  {
+    natscpp::subscription sub{nullptr, [&release_count] { ++release_count; }};
+  }
+  assert(release_count == 1);
+
+  {
+    natscpp::subscription lhs{nullptr, [&release_count] { release_count += 10; }};
+    natscpp::subscription rhs{nullptr, [&release_count] { release_count += 100; }};
+    lhs = std::move(rhs);
+  }
+
+  assert(release_count == 111);
+}
+
 void test_connection_has_sync_and_async_apis() {
   natscpp::connection nc;
   natscpp::jetstream js;
@@ -170,6 +188,7 @@ int main() {
   test_message_accessors_and_headers();
   test_future_awaitable_ready_and_resume();
   test_jetstream_and_consumers_move_semantics_on_empty_handles();
+  test_subscription_release_callback_lifecycle();
   test_connection_has_sync_and_async_apis();
   test_connection_sync_and_async_roundtrip_if_server_available();
   return 0;
