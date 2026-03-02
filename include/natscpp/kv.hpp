@@ -234,6 +234,7 @@ class key_value {
   [[nodiscard]] bool valid() const noexcept { return kv_ != nullptr; }
 
   [[nodiscard]] kv_watcher watch(std::string_view key, const kv_watch_options* options = nullptr) const {
+    check_valid();
     kvWatcher* watcher{};
     auto native = to_native_watch_options(options);
     throw_on_error(kvStore_Watch(&watcher, kv_, std::string(key).c_str(), native), "kvStore_Watch");
@@ -242,6 +243,7 @@ class key_value {
 
   [[nodiscard]] kv_watcher watch_multi(const std::vector<std::string>& keys,
                                        const kv_watch_options* options = nullptr) const {
+    check_valid();
     kvWatcher* watcher{};
     std::vector<const char*> key_ptrs;
     key_ptrs.reserve(keys.size());
@@ -256,6 +258,7 @@ class key_value {
   }
 
   [[nodiscard]] kv_watcher watch_all(const kv_watch_options* options = nullptr) const {
+    check_valid();
     kvWatcher* watcher{};
     auto native = to_native_watch_options(options);
     throw_on_error(kvStore_WatchAll(&watcher, kv_, native), "kvStore_WatchAll");
@@ -263,12 +266,14 @@ class key_value {
   }
 
   [[nodiscard]] kv_entry get(std::string_view key) const {
+    check_valid();
     kvEntry* entry{};
     throw_on_error(kvStore_Get(&entry, kv_, std::string(key).c_str()), "kvStore_Get");
     return kv_entry{entry};
   }
 
   [[nodiscard]] uint64_t put(std::string_view key, std::string_view value) {
+    check_valid();
     uint64_t rev{};
     throw_on_error(kvStore_Put(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size())),
                    "kvStore_Put");
@@ -276,6 +281,7 @@ class key_value {
   }
 
   [[nodiscard]] uint64_t create(std::string_view key, std::string_view value) {
+    check_valid();
     uint64_t rev{};
     throw_on_error(kvStore_Create(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size())),
                    "kvStore_Create");
@@ -283,6 +289,7 @@ class key_value {
   }
 
   [[nodiscard]] uint64_t update(std::string_view key, std::string_view value, uint64_t last_revision) {
+    check_valid();
     uint64_t rev{};
     throw_on_error(
         kvStore_Update(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size()), last_revision),
@@ -291,20 +298,24 @@ class key_value {
   }
 
   [[nodiscard]] kv_entry get_revision(std::string_view key, uint64_t revision) const {
+    check_valid();
     kvEntry* entry{};
     throw_on_error(kvStore_GetRevision(&entry, kv_, std::string(key).c_str(), revision), "kvStore_GetRevision");
     return kv_entry{entry};
   }
 
   void erase(std::string_view key) {
+    check_valid();
     throw_on_error(kvStore_Delete(kv_, std::string(key).c_str()), "kvStore_Delete");
   }
 
   void purge(std::string_view key) {
+    check_valid();
     throw_on_error(kvStore_Purge(kv_, std::string(key).c_str(), nullptr), "kvStore_Purge");
   }
 
   [[nodiscard]] std::vector<std::string> keys() const {
+    check_valid();
     kvKeysList list{};
     throw_on_error(kvStore_Keys(&list, kv_, nullptr), "kvStore_Keys");
     std::vector<std::string> out;
@@ -317,11 +328,13 @@ class key_value {
   }
 
   [[nodiscard]] std::string bucket() const {
+    check_valid();
     const char* value = kvStore_Bucket(kv_);
     return value == nullptr ? std::string{} : std::string{value};
   }
 
   [[nodiscard]] bucket_status status() const {
+    check_valid();
     kvStatus* raw = nullptr;
     throw_on_error(kvStore_Status(&raw, kv_), "kvStore_Status");
     bucket_status out;
@@ -337,6 +350,12 @@ class key_value {
   }
 
  private:
+  void check_valid() const {
+    if (kv_ == nullptr) {
+      throw nats_error(NATS_INVALID_ARG, "key_value: not initialized");
+    }
+  }
+
   [[nodiscard]] static const kvWatchOptions* to_native_watch_options(const kv_watch_options* options) {
     if (options == nullptr) {
       return nullptr;

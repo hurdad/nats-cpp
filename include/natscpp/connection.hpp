@@ -53,6 +53,9 @@ class connection {
     connect(options);
   }
 
+  connection(const connection&) = delete;
+  connection& operator=(const connection&) = delete;
+
   void connect(const connection_options& options = {}) {
     natsConnection* raw{};
     natsOptions* nopts = nullptr;
@@ -360,15 +363,33 @@ class connection {
     auto* fn = static_cast<std::function<void(message)>*>(closure);
     natsMsg* dup{};
     if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
-                       natsMsg_GetDataLength(msg)) == NATS_OK) {
-      try {
-        (*fn)(message{dup});
-      } catch (...) {
-        std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
-      }
-    } else {
+                       natsMsg_GetDataLength(msg)) != NATS_OK) {
       std::fprintf(stderr, "[natscpp] natsMsg_Create failed: dropping message on subject '%s'\n",
                    natsMsg_GetSubject(msg));
+      return;
+    }
+    // Copy all headers so JetStream metadata and user headers are available in the callback.
+    const char** keys = nullptr;
+    int key_count = 0;
+    if (natsMsgHeader_Keys(msg, &keys, &key_count) == NATS_OK && keys != nullptr) {
+      for (int i = 0; i < key_count; ++i) {
+        const char** vals = nullptr;
+        int val_count = 0;
+        if (natsMsgHeader_Values(msg, keys[i], &vals, &val_count) == NATS_OK && vals != nullptr) {
+          for (int j = 0; j < val_count; ++j) {
+            if (vals[j] != nullptr) {
+              natsMsgHeader_Add(dup, keys[i], vals[j]);
+            }
+          }
+          std::free(const_cast<char**>(vals));
+        }
+      }
+      std::free(const_cast<char**>(keys));
+    }
+    try {
+      (*fn)(message{dup});
+    } catch (...) {
+      std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
     }
   }
 
@@ -408,14 +429,17 @@ class connection {
     char** values = nullptr;
     int count = 0;
     throw_on_error(getter(conn_.get(), &values, &count), "natsConnection_GetServers*");
+    // RAII guard: free all strings and the array even if emplace_back throws.
+    struct list_guard {
+      char** arr; int n;
+      ~list_guard() { for (int i = 0; i < n; ++i) std::free(arr[i]); std::free(arr); }
+    } guard{values, count};
 
     std::vector<std::string> out;
     out.reserve(static_cast<std::size_t>(count));
     for (int i = 0; i < count; ++i) {
       out.emplace_back(values[i] != nullptr ? values[i] : "");
-      std::free(values[i]);
     }
-    std::free(values);
     return out;
   }
 

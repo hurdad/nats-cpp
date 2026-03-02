@@ -13,9 +13,9 @@ namespace natscpp {
  * @brief A carrier that supports OpenTelemetry-style key/value text map propagation.
  */
 template <typename T>
-concept TraceCarrier = requires(T carrier, std::string_view key, std::string_view value) {
+concept TraceCarrier = requires(T carrier, const T const_carrier, std::string_view key, std::string_view value) {
   { carrier.set(key, value) } -> std::same_as<void>;
-  { carrier.get(key) } -> std::convertible_to<std::string>;
+  { const_carrier.get(key) } -> std::convertible_to<std::string>;
 };
 
 /**
