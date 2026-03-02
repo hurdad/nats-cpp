@@ -22,7 +22,20 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
 ## Requirements
 
 - C++20 compiler
-- `nats.c` headers and runtime (`nats/nats.h`)
+- CMake 3.20+
+- `nats.c` dependency, resolved in one of two ways:
+  - bundled submodule at `third_party/nats.c` (static build wired automatically by CMake), or
+  - system install discoverable as `libnats` via `pkg-config`
+
+## Build and test
+
+```bash
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+If `third_party/nats.c` is not initialized, configure will fail unless `libnats` is installed and visible to `pkg-config`.
 
 ## Installation with CMake
 
@@ -39,6 +52,17 @@ Or embed as a subdirectory:
 add_subdirectory(path/to/natscpp)
 target_link_libraries(app PRIVATE natscpp::natscpp)
 ```
+
+## Example programs
+
+When `NATSCPP_BUILD_EXAMPLES=ON` (default), the following example targets are built:
+
+- `natscpp_sync_example`
+- `natscpp_async_example`
+- `natscpp_request_reply_example`
+- `natscpp_jetstream_sync_example`
+- `natscpp_jetstream_async_example`
+- `natscpp_kv_example`
 
 ## Sync API example
 
