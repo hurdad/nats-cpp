@@ -20,6 +20,15 @@ struct subscription_deleter {
   }
 };
 
+
+struct header_deleter {
+  void operator()(natsHeader* ptr) const noexcept {
+    if (ptr != nullptr) {
+      natsHeader_Destroy(ptr);
+    }
+  }
+};
+
 struct msg_deleter {
   void operator()(natsMsg* ptr) const noexcept {
     if (ptr != nullptr) {

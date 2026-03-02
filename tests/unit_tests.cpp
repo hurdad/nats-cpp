@@ -1,5 +1,6 @@
 #include <natscpp/awaitable.hpp>
 #include <natscpp/error.hpp>
+#include <natscpp/header.hpp>
 #include <natscpp/jetstream.hpp>
 #include <natscpp/message.hpp>
 #include <natscpp/kv.hpp>
@@ -31,6 +32,37 @@ void test_throw_on_error_reports_status_and_context() {
     const std::string what{ex.what()};
     assert(what.find("publish") != std::string::npos);
   }
+}
+
+
+void test_header_wrappers() {
+  natscpp::header h;
+  assert(natscpp::natsHeader_New(h) == NATS_OK);
+
+  assert(natscpp::natsHeader_Set(h, "x-test", "v1") == NATS_OK);
+  assert(natscpp::natsHeader_Add(h, "x-test", "v2") == NATS_OK);
+
+  const char* first = nullptr;
+  assert(natscpp::natsHeader_Get(h, "x-test", &first) == NATS_OK);
+  assert(first != nullptr);
+  assert(std::string(first) == "v1");
+
+  const char** values = nullptr;
+  int value_count = 0;
+  assert(natscpp::natsHeader_Values(h, "x-test", &values, &value_count) == NATS_OK);
+  assert(value_count == 2);
+  std::free(const_cast<char**>(values));
+
+  const char** keys = nullptr;
+  int key_count = 0;
+  assert(natscpp::natsHeader_Keys(h, &keys, &key_count) == NATS_OK);
+  assert(key_count == 1);
+  std::free(const_cast<char**>(keys));
+
+  assert(natscpp::natsHeader_KeysCount(h) == 1);
+  assert(natscpp::natsHeader_Delete(h, "x-test") == NATS_OK);
+  natscpp::natsHeader_Destroy(h);
+  assert(!h.valid());
 }
 
 void test_message_accessors_and_headers() {
@@ -195,6 +227,17 @@ void test_connection_has_sync_and_async_apis() {
     natscpp::natsOptions_SetNoEcho(opts, true);
   });
   static_assert(requires(natscpp::message m) { m.ack_sync(); m.nak_with_delay(std::chrono::milliseconds(10)); m.get_metadata(); });
+  static_assert(requires(natscpp::header h, const char** one, const char*** many, int* count) {
+    natscpp::natsHeader_New(h);
+    natscpp::natsHeader_Set(h, "k", "v");
+    natscpp::natsHeader_Add(h, "k", "v2");
+    natscpp::natsHeader_Get(h, "k", one);
+    natscpp::natsHeader_Values(h, "k", many, count);
+    natscpp::natsHeader_Keys(h, many, count);
+    natscpp::natsHeader_KeysCount(h);
+    natscpp::natsHeader_Delete(h, "k");
+    natscpp::natsHeader_Destroy(h);
+  });
   static_assert(requires(natscpp::subscription s, jsFetchRequest& req) {
     s.drain_completion_status();
     s.set_on_complete_callback([] {});
@@ -700,6 +743,7 @@ int main() {
   test_throw_on_error_ok_does_not_throw();
   test_throw_on_error_reports_status_and_context();
   test_throw_on_error_preserves_status_code();
+  test_header_wrappers();
   test_message_accessors_and_headers();
   test_message_default_constructor_null_guards();
   test_message_create_factory();
