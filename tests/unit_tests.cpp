@@ -224,6 +224,261 @@ void test_kv_bucket_and_key_crud_if_server_available() {
   natscpp::key_value::delete_bucket(nc, bucket);
 }
 
+// ---------------------------------------------------------------------------
+// Additional unit tests (no server required)
+// ---------------------------------------------------------------------------
+
+void test_throw_on_error_preserves_status_code() {
+  // Each non-OK status must be carried in the exception.
+  for (natsStatus s : {NATS_TIMEOUT, NATS_NOT_FOUND, NATS_NOT_PERMITTED, NATS_NO_MEMORY}) {
+    try {
+      natscpp::throw_on_error(s, "ctx");
+      assert(false && "expected throw");
+    } catch (const natscpp::nats_error& ex) {
+      assert(ex.status() == s);
+      const std::string what{ex.what()};
+      assert(what.find("ctx") != std::string::npos);
+    }
+  }
+}
+
+void test_message_default_constructor_null_guards() {
+  // Default-constructed message is invalid; every accessor returns a safe empty value.
+  natscpp::message msg;
+  assert(!msg.valid());
+  assert(msg.native_handle() == nullptr);
+  assert(msg.subject().empty());
+  assert(msg.reply_to().empty());
+  assert(msg.data().empty());
+  assert(msg.header("x").empty());
+  assert(msg.header_values("x").empty());
+  assert(msg.header_keys().empty());
+  assert(!msg.is_no_responders());
+  assert(msg.sequence() == 0);
+  assert(msg.timestamp() == 0);
+  // Mutating operations on an invalid message must be silent no-ops.
+  msg.set_header("k", "v");
+  msg.add_header("k", "v");
+  msg.delete_header("k");
+}
+
+void test_message_create_factory() {
+  auto msg = natscpp::message::create("subj.x", "reply.y", "body");
+  assert(msg.valid());
+  assert(msg.native_handle() != nullptr);
+  assert(msg.subject() == "subj.x");
+  assert(msg.reply_to() == "reply.y");
+  assert(msg.data() == "body");
+  assert(!msg.is_no_responders());
+  // sequence and timestamp are 0 for a non-JetStream message.
+  assert(msg.sequence() == 0);
+
+  // Empty reply_to is passed as nullptr to natsMsg_Create.
+  auto msg2 = natscpp::message::create("s", "", "d");
+  assert(msg2.valid());
+  assert(msg2.reply_to().empty());
+}
+
+void test_message_release_transfers_ownership() {
+  auto msg = natscpp::message::create("s", "", "payload");
+  assert(msg.valid());
+  natsMsg* raw = msg.release();
+  assert(raw != nullptr);
+  assert(!msg.valid());
+  assert(msg.native_handle() == nullptr);
+  natsMsg_Destroy(raw);
+}
+
+void test_subscription_default_constructor() {
+  natscpp::subscription sub;
+  assert(!sub.valid());
+  assert(!sub.is_valid());
+  assert(sub.id() == -1);
+  assert(sub.subject().empty());
+  assert(sub.native_handle() == nullptr);
+  // drain_completion_status() on a null sub must return NATS_OK (null guard).
+  assert(sub.drain_completion_status() == NATS_OK);
+}
+
+void test_new_inbox_generates_unique_subjects() {
+  // natsInbox_Create is a standalone function; new_inbox() does not touch conn_.
+  natscpp::connection nc;
+  const auto a = nc.new_inbox();
+  const auto b = nc.new_inbox();
+  assert(!a.empty());
+  assert(!b.empty());
+  assert(a != b);
+}
+
+// ---------------------------------------------------------------------------
+// Additional integration tests (skip if no NATS server)
+// ---------------------------------------------------------------------------
+
+void test_connection_state_accessors_if_server_available() {
+  natscpp::connection nc;
+
+  // Before connect: closed / not connected.
+  assert(!nc.connected());
+  assert(nc.is_closed());
+  assert(!nc.is_reconnecting());
+  assert(!nc.is_draining());
+  assert(nc.status() == NATS_CONN_STATUS_CLOSED);
+  assert(nc.buffered_bytes() == 0);
+  assert(nc.max_payload() == 0);
+
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping connection state checks (NATS server unavailable)\n";
+    return;
+  }
+
+  assert(nc.connected());
+  assert(!nc.is_closed());
+  assert(!nc.is_reconnecting());
+  assert(!nc.is_draining());
+  assert(nc.status() == NATS_CONN_STATUS_CONNECTED);
+  assert(nc.max_payload() > 0);
+  assert(nc.client_id() > 0);
+  assert(!nc.client_ip().empty());
+  assert(nc.rtt().count() >= 0);
+
+  nc.close();
+  assert(nc.is_closed());
+  assert(nc.status() == NATS_CONN_STATUS_CLOSED);
+}
+
+void test_publish_request_variants_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping publish_request variants (NATS server unavailable)\n";
+    return;
+  }
+
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.test.preq." + ts;
+
+  // Echo responder.
+  auto responder = nc.subscribe_async(subj, [&nc](natscpp::message msg) {
+    if (!msg.reply_to().empty()) {
+      nc.publish(std::string(msg.reply_to()), msg.data());
+    }
+  });
+
+  // request_string
+  auto r1 = nc.request_string(subj, "hello-str", std::chrono::seconds(2));
+  assert(r1.data() == "hello-str");
+
+  // request(message) overload
+  auto req = natscpp::message::create(subj, "", "hello-msg");
+  auto r2 = nc.request(std::move(req), std::chrono::seconds(2));
+  assert(r2.data() == "hello-msg");
+
+  // publish_request: subscribe to an explicit inbox, then publish with that reply-to
+  const auto inbox1 = nc.new_inbox();
+  auto inbox_sub1 = nc.subscribe_sync(inbox1);
+  nc.publish_request(subj, inbox1, "hello-preq");
+  auto r3 = inbox_sub1.next_message(std::chrono::seconds(2));
+  assert(r3.data() == "hello-preq");
+
+  // publish_request_string
+  const auto inbox2 = nc.new_inbox();
+  auto inbox_sub2 = nc.subscribe_sync(inbox2);
+  nc.publish_request_string(subj, inbox2, "hello-preqs");
+  auto r4 = inbox_sub2.next_message(std::chrono::seconds(2));
+  assert(r4.data() == "hello-preqs");
+
+  responder.unsubscribe();
+}
+
+void test_queue_subscription_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping queue subscription checks (NATS server unavailable)\n";
+    return;
+  }
+
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.test.queue." + ts;
+
+  std::promise<std::string> received;
+  auto sub = nc.subscribe_queue_async(subj, "workers", [&received](natscpp::message msg) {
+    try { received.set_value(std::string(msg.data())); } catch (...) {}
+  });
+
+  nc.publish(subj, "queued-msg");
+  assert(received.get_future().get() == "queued-msg");
+  sub.unsubscribe();
+}
+
+void test_subscription_drain_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping subscription drain checks (NATS server unavailable)\n";
+    return;
+  }
+
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.test.drain." + ts;
+
+  auto sub = nc.subscribe_async(subj, [](natscpp::message) {});
+  sub.no_delivery_delay();
+  sub.drain(std::chrono::milliseconds(500));
+  sub.wait_for_drain_completion(std::chrono::milliseconds(500));
+  assert(sub.drain_completion_status() == NATS_OK);
+}
+
+void test_kv_put_erase_and_entry_fields_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping kv put/erase/fields checks (NATS server unavailable)\n";
+    return;
+  }
+
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string bucket = "NATSCPP_KV2_" + ts;
+  const std::string key = "item-1";
+
+  auto kv = natscpp::key_value::create(nc, bucket, 2);
+
+  // put: create or overwrite
+  const auto r1 = kv.put(key, "put-v1");
+  assert(r1 >= 1);
+
+  auto e1 = kv.get(key);
+  assert(e1.valid());
+  assert(e1.key() == key);
+  assert(e1.value() == "put-v1");
+  assert(e1.bucket() == bucket);
+  assert(e1.revision() == r1);
+  assert(e1.created() != 0);
+  (void)e1.delta();             // valid to call; value is context-dependent
+  assert(e1.operation() == kvOp_Put);
+
+  // put again to create a second revision
+  const auto r2 = kv.put(key, "put-v2");
+  assert(r2 > r1);
+
+  // erase: marks key deleted (tombstone); subsequent get must throw NATS_NOT_FOUND
+  kv.erase(key);
+  try {
+    (void)kv.get(key);
+    assert(false && "expected NATS_NOT_FOUND after erase");
+  } catch (const natscpp::nats_error& ex) {
+    assert(ex.status() == NATS_NOT_FOUND);
+  }
+
+  natscpp::key_value::delete_bucket(nc, bucket);
+}
+
 void test_connection_sync_and_async_roundtrip_if_server_available() {
   natscpp::connection nc;
   try {
@@ -294,12 +549,23 @@ void test_connection_sync_and_async_roundtrip_if_server_available() {
 int main() {
   test_throw_on_error_ok_does_not_throw();
   test_throw_on_error_reports_status_and_context();
+  test_throw_on_error_preserves_status_code();
   test_message_accessors_and_headers();
+  test_message_default_constructor_null_guards();
+  test_message_create_factory();
+  test_message_release_transfers_ownership();
   test_future_awaitable_ready_and_resume();
   test_jetstream_and_consumers_move_semantics_on_empty_handles();
   test_subscription_release_callback_lifecycle();
+  test_subscription_default_constructor();
+  test_new_inbox_generates_unique_subjects();
   test_connection_has_sync_and_async_apis();
+  test_connection_state_accessors_if_server_available();
   test_connection_sync_and_async_roundtrip_if_server_available();
+  test_publish_request_variants_if_server_available();
+  test_queue_subscription_if_server_available();
+  test_subscription_drain_if_server_available();
   test_kv_bucket_and_key_crud_if_server_available();
+  test_kv_put_erase_and_entry_fields_if_server_available();
   return 0;
 }
