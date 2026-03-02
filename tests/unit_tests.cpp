@@ -7,6 +7,7 @@
 #include <natscpp/library.hpp>
 #include <natscpp/trace.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <functional>
@@ -288,8 +289,78 @@ void test_connection_has_sync_and_async_apis() {
     js.create_consumer_group(natscpp::js_consumer_config{.stream = "ORDERS", .durable_name = "orders-pull"});
   });
   static_assert(requires {
+    js.update_consumer_group(natscpp::js_consumer_config{.stream = "ORDERS", .durable_name = "orders-pull"});
+  });
+  static_assert(requires {
+    js.get_consumer_group("ORDERS", "orders-pull");
+    js.delete_consumer_group("ORDERS", "orders-pull");
+    js.list_consumer_groups("ORDERS");
+    js.list_consumer_group_names("ORDERS");
+  });
+  static_assert(requires {
     js.push_subscribe("orders.created", "orders-push");
   });
+}
+
+void test_jetstream_consumer_group_crud_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping jetstream consumer group checks (NATS server unavailable)\n";
+    return;
+  }
+
+  natscpp::jetstream js(nc);
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string stream = "NATSCPP_CG_" + ts;
+  const std::string subject = "natscpp.cg." + ts + ".>";
+  const std::string durable = "cg" + ts;
+
+  auto created_stream = js.create_stream(natscpp::js_stream_config{.name = stream, .subjects = {subject}});
+  assert(created_stream.name == stream);
+
+  auto created = js.create_consumer_group(natscpp::js_consumer_config{
+      .stream = stream,
+      .durable_name = durable,
+      .filter_subject = "natscpp.cg." + ts + ".created",
+      .type = natscpp::js_consumer_type::pull,
+  });
+  assert(created.stream_name == stream);
+  assert(created.durable_name == durable);
+
+  auto fetched = js.get_consumer_group(stream, durable);
+  assert(fetched.stream_name == stream);
+  assert(fetched.durable_name == durable);
+
+  auto names = js.list_consumer_group_names(stream);
+  assert(!names.empty());
+  assert(std::find(names.begin(), names.end(), durable) != names.end());
+
+  auto infos = js.list_consumer_groups(stream);
+  assert(!infos.empty());
+  auto found = std::find_if(infos.begin(), infos.end(), [&](const natscpp::consumer_info& info) {
+    return info.durable_name == durable && info.stream_name == stream;
+  });
+  assert(found != infos.end());
+
+  auto updated = js.update_consumer_group(natscpp::js_consumer_config{
+      .stream = stream,
+      .durable_name = durable,
+      .filter_subject = "natscpp.cg." + ts + ".updated",
+      .type = natscpp::js_consumer_type::pull,
+  });
+  assert(updated.stream_name == stream);
+  assert(updated.durable_name == durable);
+
+  js.delete_consumer_group(stream, durable);
+  try {
+    (void)js.get_consumer_group(stream, durable);
+    assert(false && "expected get_consumer_group to fail after delete");
+  } catch (const natscpp::nats_error& ex) {
+    assert(ex.status() != NATS_OK);
+  }
+
 }
 
 void test_kv_bucket_and_key_crud_if_server_available() {
@@ -784,6 +855,7 @@ int main() {
   test_publish_request_variants_if_server_available();
   test_queue_subscription_if_server_available();
   test_subscription_drain_if_server_available();
+  test_jetstream_consumer_group_crud_if_server_available();
   test_kv_bucket_and_key_crud_if_server_available();
   test_kv_put_erase_and_entry_fields_if_server_available();
   test_kv_watchers_if_server_available();
