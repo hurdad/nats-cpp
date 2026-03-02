@@ -41,16 +41,20 @@ inline void* resolve_symbol(const char* name) {
 #endif
 }
 
+// These helpers are called from noexcept destructors/move-assigns, so they
+// silently skip when the symbol is unavailable rather than throwing.
 inline void destroy_js_subscription(natsSubscription* sub) {
   using destroy_fn = void (*)(natsSubscription*);
-  if (auto* fn = reinterpret_cast<destroy_fn>(resolve_symbol("natsSubscription_Destroy")); fn != nullptr && sub != nullptr) {
+  static auto* fn = reinterpret_cast<destroy_fn>(resolve_symbol("natsSubscription_Destroy"));
+  if (fn != nullptr && sub != nullptr) {
     fn(sub);
   }
 }
 
 inline void destroy_js_context(jsCtx* ctx) {
   using destroy_fn = void (*)(jsCtx*);
-  if (auto* fn = reinterpret_cast<destroy_fn>(resolve_symbol("jsCtx_Destroy")); fn != nullptr && ctx != nullptr) {
+  static auto* fn = reinterpret_cast<destroy_fn>(resolve_symbol("jsCtx_Destroy"));
+  if (fn != nullptr && ctx != nullptr) {
     fn(ctx);
   }
 }
@@ -123,7 +127,7 @@ class js_pull_consumer {
 
   [[nodiscard]] message next(std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
     using next_fn = natsStatus (*)(natsMsg**, natsSubscription*, int64_t);
-    auto* fn = reinterpret_cast<next_fn>(detail::resolve_symbol("natsSubscription_NextMsg"));
+    static auto* fn = reinterpret_cast<next_fn>(detail::resolve_symbol("natsSubscription_NextMsg"));
     if (fn == nullptr) {
       throw jetstream_not_available();
     }
@@ -174,7 +178,7 @@ class jetstream {
 
   explicit jetstream(connection& conn) {
     using create_fn = natsStatus (*)(jsCtx**, natsConnection*, jsOptions*);
-    auto* fn = reinterpret_cast<create_fn>(detail::resolve_symbol("natsConnection_JetStream"));
+    static auto* fn = reinterpret_cast<create_fn>(detail::resolve_symbol("natsConnection_JetStream"));
     if (fn == nullptr) {
       throw jetstream_not_available();
     }
@@ -201,39 +205,39 @@ class jetstream {
 
   void publish(std::string_view subject, std::string_view payload, const js_publish_options& = {}) {
     using publish_fn = natsStatus (*)(jsPubAck**, jsCtx*, const char*, const void*, int, jsPubOptions*, jsErrCode*);
-    auto* fn = reinterpret_cast<publish_fn>(detail::resolve_symbol("js_Publish"));
-    if (fn == nullptr) {
+    using ack_destroy_fn = void (*)(jsPubAck*);
+    static auto* fn = reinterpret_cast<publish_fn>(detail::resolve_symbol("js_Publish"));
+    static auto* destroy = reinterpret_cast<ack_destroy_fn>(detail::resolve_symbol("jsPubAck_Destroy"));
+    if (fn == nullptr || destroy == nullptr) {
       throw jetstream_not_available();
     }
 
     jsPubAck* ack{};
-    throw_on_error(fn(&ack, ctx_, std::string(subject).c_str(), payload.data(), static_cast<int>(payload.size()), nullptr,
-                      nullptr),
+    throw_on_error(fn(&ack, ctx_, std::string(subject).c_str(), payload.data(), static_cast<int>(payload.size()),
+                      nullptr, nullptr),
                    "js_Publish");
-
-    using ack_destroy_fn = void (*)(jsPubAck*);
-    if (auto* destroy = reinterpret_cast<ack_destroy_fn>(detail::resolve_symbol("jsPubAck_Destroy"));
-        destroy != nullptr && ack != nullptr) {
+    if (ack != nullptr) {
       destroy(ack);
     }
   }
 
   [[nodiscard]] js_pull_consumer pull_subscribe(std::string_view stream_subject, std::string_view durable_name) {
     using pull_sub_fn = natsStatus (*)(natsSubscription**, jsCtx*, const char*, const char*, jsOptions*, jsSubOptions*, jsErrCode*);
-    auto* fn = reinterpret_cast<pull_sub_fn>(detail::resolve_symbol("js_PullSubscribe"));
+    static auto* fn = reinterpret_cast<pull_sub_fn>(detail::resolve_symbol("js_PullSubscribe"));
     if (fn == nullptr) {
       throw jetstream_not_available();
     }
 
     natsSubscription* sub{};
-    throw_on_error(fn(&sub, ctx_, std::string(stream_subject).c_str(), std::string(durable_name).c_str(), nullptr, nullptr, nullptr),
+    throw_on_error(fn(&sub, ctx_, std::string(stream_subject).c_str(), std::string(durable_name).c_str(),
+                      nullptr, nullptr, nullptr),
                    "js_PullSubscribe");
     return js_pull_consumer{sub};
   }
 
   [[nodiscard]] js_push_consumer push_subscribe(std::string_view stream_subject, std::string_view /*durable_name*/) {
     using sub_fn = natsStatus (*)(natsSubscription**, jsCtx*, const char*, jsOptions*, jsSubOptions*, jsErrCode*);
-    auto* fn = reinterpret_cast<sub_fn>(detail::resolve_symbol("js_SubscribeSync"));
+    static auto* fn = reinterpret_cast<sub_fn>(detail::resolve_symbol("js_SubscribeSync"));
     if (fn == nullptr) {
       throw jetstream_not_available();
     }
@@ -250,8 +254,10 @@ class jetstream {
 
   [[nodiscard]] stream_info create_stream(const js_stream_config& config) {
     using add_stream_fn = natsStatus (*)(jsStreamInfo**, jsCtx*, jsStreamConfig*, jsOptions*, jsErrCode*);
-    auto* fn = reinterpret_cast<add_stream_fn>(detail::resolve_symbol("js_AddStream"));
-    if (fn == nullptr) {
+    using stream_destroy_fn = void (*)(jsStreamInfo*);
+    static auto* fn = reinterpret_cast<add_stream_fn>(detail::resolve_symbol("js_AddStream"));
+    static auto* destroy = reinterpret_cast<stream_destroy_fn>(detail::resolve_symbol("jsStreamInfo_Destroy"));
+    if (fn == nullptr || destroy == nullptr) {
       throw jetstream_not_available();
     }
 
@@ -272,10 +278,7 @@ class jetstream {
 
     jsStreamInfo* stream_info_raw{};
     throw_on_error(fn(&stream_info_raw, ctx_, &stream_config, nullptr, nullptr), "js_AddStream");
-
-    using stream_destroy_fn = void (*)(jsStreamInfo*);
-    if (auto* destroy = reinterpret_cast<stream_destroy_fn>(detail::resolve_symbol("jsStreamInfo_Destroy"));
-        destroy != nullptr && stream_info_raw != nullptr) {
+    if (stream_info_raw != nullptr) {
       destroy(stream_info_raw);
     }
 
@@ -284,8 +287,10 @@ class jetstream {
 
   [[nodiscard]] consumer_info create_consumer_group(const js_consumer_config& config) {
     using add_consumer_fn = natsStatus (*)(jsConsumerInfo**, jsCtx*, const char*, jsConsumerConfig*, jsOptions*, jsErrCode*);
-    auto* fn = reinterpret_cast<add_consumer_fn>(detail::resolve_symbol("js_AddConsumer"));
-    if (fn == nullptr) {
+    using consumer_destroy_fn = void (*)(jsConsumerInfo*);
+    static auto* fn = reinterpret_cast<add_consumer_fn>(detail::resolve_symbol("js_AddConsumer"));
+    static auto* destroy = reinterpret_cast<consumer_destroy_fn>(detail::resolve_symbol("jsConsumerInfo_Destroy"));
+    if (fn == nullptr || destroy == nullptr) {
       throw jetstream_not_available();
     }
 
@@ -310,10 +315,7 @@ class jetstream {
     jsConsumerInfo* consumer_info_raw{};
     throw_on_error(fn(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr, nullptr),
                    "js_AddConsumer");
-
-    using consumer_destroy_fn = void (*)(jsConsumerInfo*);
-    if (auto* destroy = reinterpret_cast<consumer_destroy_fn>(detail::resolve_symbol("jsConsumerInfo_Destroy"));
-        destroy != nullptr && consumer_info_raw != nullptr) {
+    if (consumer_info_raw != nullptr) {
       destroy(consumer_info_raw);
     }
 

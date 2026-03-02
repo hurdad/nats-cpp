@@ -41,7 +41,7 @@ class connection {
   void connect(const connection_options& options = {}) {
     natsConnection* raw{};
     throw_on_error(natsConnection_ConnectTo(&raw, options.url.c_str()), "natsConnection_ConnectTo");
-    conn_.reset(raw);
+    conn_.reset(raw, detail::connection_deleter{});
   }
 
   [[nodiscard]] bool connected() const noexcept { return conn_ != nullptr; }
@@ -185,9 +185,17 @@ class connection {
 
   [[nodiscard]] std::future<message> request_async(
       std::string subject, std::string payload, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
-    return std::async(std::launch::async, [this, subject = std::move(subject), payload = std::move(payload), timeout]() {
-      return request_sync(subject, payload, timeout);
-    });
+    auto conn_ref = conn_;  // extend connection lifetime across the async call
+    return std::async(std::launch::async,
+                      [conn_ref, subject = std::move(subject), payload = std::move(payload), timeout]() {
+                        natsMsg* reply{};
+                        throw_on_error(
+                            natsConnection_Request(&reply, conn_ref.get(), subject.c_str(), payload.data(),
+                                                   static_cast<int>(payload.size()),
+                                                   static_cast<int64_t>(timeout.count())),
+                            "natsConnection_Request");
+                        return message{reply};
+                      });
   }
 
   [[nodiscard]] future_awaitable<message> request_awaitable(
@@ -212,7 +220,7 @@ class connection {
     std::mutex mutex;
   };
 
-  std::unique_ptr<natsConnection, detail::connection_deleter> conn_;
+  std::shared_ptr<natsConnection> conn_;
   std::shared_ptr<callback_state> callback_state_ = std::make_shared<callback_state>();
 };
 

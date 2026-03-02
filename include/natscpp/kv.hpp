@@ -38,17 +38,29 @@ inline void* resolve_kv_symbol(const char* name) {
 #endif
 }
 
+// These helpers are called from noexcept destructors/move-assigns, so they
+// silently skip when the symbol is unavailable rather than throwing.
 inline void destroy_kv_store(kvStore* kv) {
   using destroy_fn = void (*)(kvStore*);
-  if (auto* fn = reinterpret_cast<destroy_fn>(resolve_kv_symbol("kvStore_Destroy")); fn != nullptr && kv != nullptr) {
+  static auto* fn = reinterpret_cast<destroy_fn>(resolve_kv_symbol("kvStore_Destroy"));
+  if (fn != nullptr && kv != nullptr) {
     fn(kv);
   }
 }
 
 inline void destroy_kv_entry(kvEntry* entry) {
   using destroy_fn = void (*)(kvEntry*);
-  if (auto* fn = reinterpret_cast<destroy_fn>(resolve_kv_symbol("kvEntry_Destroy")); fn != nullptr && entry != nullptr) {
+  static auto* fn = reinterpret_cast<destroy_fn>(resolve_kv_symbol("kvEntry_Destroy"));
+  if (fn != nullptr && entry != nullptr) {
     fn(entry);
+  }
+}
+
+inline void destroy_kv_context(jsCtx* ctx) {
+  using destroy_fn = void (*)(jsCtx*);
+  static auto* fn = reinterpret_cast<destroy_fn>(resolve_kv_symbol("jsCtx_Destroy"));
+  if (fn != nullptr && ctx != nullptr) {
+    fn(ctx);
   }
 }
 }  // namespace detail
@@ -76,7 +88,7 @@ class kv_entry {
 
   [[nodiscard]] std::string key() const {
     using key_fn = const char* (*)(kvEntry*);
-    auto* fn = reinterpret_cast<key_fn>(detail::resolve_kv_symbol("kvEntry_Key"));
+    static auto* fn = reinterpret_cast<key_fn>(detail::resolve_kv_symbol("kvEntry_Key"));
     if (fn == nullptr) {
       throw kv_not_available();
     }
@@ -87,8 +99,8 @@ class kv_entry {
   [[nodiscard]] std::string value() const {
     using value_fn = const void* (*)(kvEntry*);
     using len_fn = int (*)(kvEntry*);
-    auto* value_getter = reinterpret_cast<value_fn>(detail::resolve_kv_symbol("kvEntry_Value"));
-    auto* len_getter = reinterpret_cast<len_fn>(detail::resolve_kv_symbol("kvEntry_ValueLen"));
+    static auto* value_getter = reinterpret_cast<value_fn>(detail::resolve_kv_symbol("kvEntry_Value"));
+    static auto* len_getter = reinterpret_cast<len_fn>(detail::resolve_kv_symbol("kvEntry_ValueLen"));
     if (value_getter == nullptr || len_getter == nullptr) {
       throw kv_not_available();
     }
@@ -103,7 +115,7 @@ class kv_entry {
 
   [[nodiscard]] uint64_t revision() const {
     using rev_fn = uint64_t (*)(kvEntry*);
-    auto* fn = reinterpret_cast<rev_fn>(detail::resolve_kv_symbol("kvEntry_Revision"));
+    static auto* fn = reinterpret_cast<rev_fn>(detail::resolve_kv_symbol("kvEntry_Revision"));
     if (fn == nullptr) {
       throw kv_not_available();
     }
@@ -122,22 +134,24 @@ class key_value {
     using js_create_fn = natsStatus (*)(jsCtx**, natsConnection*, jsOptions*);
     using kv_open_fn = natsStatus (*)(kvStore**, jsCtx*, const char*);
 
-    auto* create_js = reinterpret_cast<js_create_fn>(detail::resolve_kv_symbol("natsConnection_JetStream"));
-    auto* open_kv = reinterpret_cast<kv_open_fn>(detail::resolve_kv_symbol("js_KeyValue"));
+    static auto* create_js = reinterpret_cast<js_create_fn>(detail::resolve_kv_symbol("natsConnection_JetStream"));
+    static auto* open_kv = reinterpret_cast<kv_open_fn>(detail::resolve_kv_symbol("js_KeyValue"));
     if (create_js == nullptr || open_kv == nullptr) {
       throw kv_not_available();
     }
 
     throw_on_error(create_js(&ctx_, conn.native_handle(), nullptr), "natsConnection_JetStream");
-    throw_on_error(open_kv(&kv_, ctx_, std::string(bucket).c_str()), "js_KeyValue");
+    try {
+      throw_on_error(open_kv(&kv_, ctx_, std::string(bucket).c_str()), "js_KeyValue");
+    } catch (...) {
+      detail::destroy_kv_context(ctx_);
+      ctx_ = nullptr;
+      throw;
+    }
   }
 
   ~key_value() {
-    detail::destroy_kv_store(kv_);
-    using destroy_ctx_fn = void (*)(jsCtx*);
-    if (auto* fn = reinterpret_cast<destroy_ctx_fn>(detail::resolve_kv_symbol("jsCtx_Destroy")); fn != nullptr && ctx_ != nullptr) {
-      fn(ctx_);
-    }
+    destroy_self();
   }
 
   key_value(const key_value&) = delete;
@@ -149,12 +163,7 @@ class key_value {
   }
   key_value& operator=(key_value&& other) noexcept {
     if (this != &other) {
-      detail::destroy_kv_store(kv_);
-      using destroy_ctx_fn = void (*)(jsCtx*);
-      if (auto* fn = reinterpret_cast<destroy_ctx_fn>(detail::resolve_kv_symbol("jsCtx_Destroy")); fn != nullptr && ctx_ != nullptr) {
-        fn(ctx_);
-      }
-
+      destroy_self();
       ctx_ = other.ctx_;
       kv_ = other.kv_;
       other.ctx_ = nullptr;
@@ -167,7 +176,7 @@ class key_value {
 
   [[nodiscard]] kv_entry get(std::string_view key) const {
     using get_fn = natsStatus (*)(kvEntry**, kvStore*, const char*);
-    auto* fn = reinterpret_cast<get_fn>(detail::resolve_kv_symbol("kvStore_Get"));
+    static auto* fn = reinterpret_cast<get_fn>(detail::resolve_kv_symbol("kvStore_Get"));
     if (fn == nullptr) {
       throw kv_not_available();
     }
@@ -179,19 +188,20 @@ class key_value {
 
   [[nodiscard]] uint64_t put(std::string_view key, std::string_view value) {
     using put_fn = natsStatus (*)(uint64_t*, kvStore*, const char*, const void*, int);
-    auto* fn = reinterpret_cast<put_fn>(detail::resolve_kv_symbol("kvStore_Put"));
+    static auto* fn = reinterpret_cast<put_fn>(detail::resolve_kv_symbol("kvStore_Put"));
     if (fn == nullptr) {
       throw kv_not_available();
     }
 
     uint64_t rev{};
-    throw_on_error(fn(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size())), "kvStore_Put");
+    throw_on_error(fn(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size())),
+                   "kvStore_Put");
     return rev;
   }
 
   void erase(std::string_view key) {
     using delete_fn = natsStatus (*)(kvStore*, const char*);
-    auto* fn = reinterpret_cast<delete_fn>(detail::resolve_kv_symbol("kvStore_Delete"));
+    static auto* fn = reinterpret_cast<delete_fn>(detail::resolve_kv_symbol("kvStore_Delete"));
     if (fn == nullptr) {
       throw kv_not_available();
     }
@@ -200,6 +210,13 @@ class key_value {
   }
 
  private:
+  void destroy_self() noexcept {
+    detail::destroy_kv_store(kv_);
+    kv_ = nullptr;
+    detail::destroy_kv_context(ctx_);
+    ctx_ = nullptr;
+  }
+
   jsCtx* ctx_{};
   kvStore* kv_{};
 };
