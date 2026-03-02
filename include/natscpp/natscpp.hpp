@@ -43,6 +43,13 @@
  * // JetStream publish + pull consumer
  * natscpp::connection nc;
  * natscpp::jetstream js(nc);
+ * js.create_stream({.name = "ORDERS", .subjects = {"orders.>"}});
+ * js.create_consumer_group({
+ *   .stream = "ORDERS",
+ *   .durable_name = "orders-worker",
+ *   .filter_subject = "orders.created",
+ *   .type = natscpp::js_consumer_type::pull,
+ * });
  * js.publish("orders.created", R"({"order_id":"A-1"})");
  * auto pull = js.pull_subscribe("orders.created", "orders-worker");
  * auto pulled_msg = pull.next(std::chrono::seconds(1));

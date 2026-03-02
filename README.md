@@ -13,7 +13,8 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
   - request/reply (sync + async)
   - explicit subscribe APIs for both sync and async callback styles
 - Optional coroutine support (`co_await`) through future awaitables.
-- JetStream wrappers (context, publish, push/pull subscriptions).
+- JetStream wrappers (context, stream/consumer management, push/pull subscriptions).
+- Stream + consumer-group creation helpers (`create_stream`, `create_consumer_group`).
 - KeyValue wrappers (open bucket, put/get/delete entries).
 - Trace propagation helpers using NATS headers (`TraceCarrier` concept).
 - Graceful JetStream fallback when linked `nats.c` does not expose JetStream symbols.
@@ -88,6 +89,14 @@ sub.unsubscribe();
 
 natscpp::connection nc;
 natscpp::jetstream js(nc);
+
+js.create_stream({.name = "ORDERS", .subjects = {"orders.>"}});
+js.create_consumer_group({
+  .stream = "ORDERS",
+  .durable_name = "orders-worker",
+  .filter_subject = "orders.created",
+  .type = natscpp::js_consumer_type::pull,
+});
 
 js.publish("orders.created", R"({"id":"A-1"})");
 auto pull = js.pull_subscribe("orders.created", "orders-worker");
