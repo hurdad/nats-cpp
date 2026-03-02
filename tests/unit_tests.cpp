@@ -126,8 +126,12 @@ void test_connection_has_sync_and_async_apis() {
   natscpp::jetstream js;
 
   static_assert(requires { nc.subscribe_sync("subj"); });
+  static_assert(requires(std::function<void(natscpp::message)> fn) { nc.subscribe_async_timeout("subj", std::chrono::milliseconds(10), fn); });
   static_assert(requires { nc.flush(std::chrono::milliseconds(10)); });
   static_assert(requires { nc.flush(); });
+  static_assert(requires { nc.sign("nonce"); });
+  static_assert(requires { nc.process_read_event(); });
+  static_assert(requires { nc.process_write_event(); });
   static_assert(requires { nc.is_closed(); });
   static_assert(requires { nc.is_reconnecting(); });
   static_assert(requires { nc.is_draining(); });
@@ -149,12 +153,24 @@ void test_connection_has_sync_and_async_apis() {
   static_assert(requires { nc.publish_request("subj", "reply", "payload"); });
   static_assert(requires { nc.publish_request_string("subj", "reply", "payload"); });
   static_assert(requires { nc.subscribe_queue_sync("subj", "workers"); });
+  static_assert(requires(std::function<void(natscpp::message)> fn) {
+    nc.subscribe_queue_async_timeout("subj", "workers", std::chrono::milliseconds(10), fn);
+  });
   static_assert(requires(std::function<void(natscpp::message)> fn) { nc.subscribe_async("subj", fn); });
   static_assert(requires(std::function<void(natscpp::message)> fn) {
     nc.subscribe_queue_async("subj", "workers", fn);
   });
   static_assert(requires { nc.request_sync("svc", "payload"); });
   static_assert(requires { nc.request_async("svc", "payload"); });
+  static_assert(requires(natscpp::message m) { m.ack_sync(); m.nak_with_delay(std::chrono::milliseconds(10)); m.get_metadata(); });
+  static_assert(requires(natscpp::subscription s, jsFetchRequest& req) {
+    s.drain_completion_status();
+    s.set_on_complete_callback([] {});
+    s.fetch(1, std::chrono::milliseconds(10));
+    s.fetch_request(req);
+    s.get_consumer_info();
+    s.get_sequence_mismatch();
+  });
   static_assert(requires { natscpp::key_value(nc, "bucket"); });
   static_assert(requires { natscpp::key_value::create(nc, "bucket"); });
   static_assert(requires { natscpp::key_value::delete_bucket(nc, "bucket"); });

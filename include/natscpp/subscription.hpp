@@ -5,9 +5,12 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <natscpp/detail/deleters.hpp>
 #include <natscpp/error.hpp>
@@ -28,6 +31,17 @@ class subscription {
   struct pending_state {
     int messages = 0;
     int bytes = 0;
+  };
+
+  struct consumer_info {
+    std::string stream;
+    std::string name;
+  };
+
+  struct consumer_sequence_mismatch {
+    uint64_t stream_seq = 0;
+    uint64_t consumer_client_seq = 0;
+    uint64_t consumer_server_seq = 0;
   };
 
   struct stats {
@@ -156,6 +170,85 @@ class subscription {
                    "natsSubscription_WaitForDrainCompletion");
   }
 
+  [[nodiscard]] natsStatus drain_completion_status() const noexcept {
+    return sub_ != nullptr ? natsSubscription_DrainCompletionStatus(sub_.get()) : NATS_OK;
+  }
+
+  void set_on_complete_callback(std::function<void()> cb) {
+    auto token = std::make_shared<std::function<void()>>(std::move(cb));
+    {
+      std::lock_guard<std::mutex> lock(completion_callbacks_mutex_);
+      completion_callbacks_[token.get()] = token;
+    }
+
+    natsStatus status = natsSubscription_SetOnCompleteCB(
+        sub_.get(),
+        [](void* closure) {
+          auto* fn = static_cast<std::function<void()>*>(closure);
+          try {
+            (*fn)();
+          } catch (...) {
+          }
+        },
+        token.get());
+
+    if (status != NATS_OK) {
+      std::lock_guard<std::mutex> lock(completion_callbacks_mutex_);
+      completion_callbacks_.erase(token.get());
+      throw_on_error(status, "natsSubscription_SetOnCompleteCB");
+    }
+  }
+
+  [[nodiscard]] std::vector<message> fetch(int batch, std::chrono::milliseconds timeout) {
+    natsMsgList list{};
+    throw_on_error(natsSubscription_Fetch(&list, sub_.get(), batch, static_cast<int64_t>(timeout.count()), nullptr),
+                   "natsSubscription_Fetch");
+
+    std::vector<message> out;
+    out.reserve(static_cast<std::size_t>(list.Count));
+    for (int i = 0; i < list.Count; ++i) {
+      out.emplace_back(list.Msgs[i]);
+      list.Msgs[i] = nullptr;
+    }
+    natsMsgList_Destroy(&list);
+    return out;
+  }
+
+  [[nodiscard]] std::vector<message> fetch_request(jsFetchRequest& request) {
+    natsMsgList list{};
+    throw_on_error(natsSubscription_FetchRequest(&list, sub_.get(), &request), "natsSubscription_FetchRequest");
+
+    std::vector<message> out;
+    out.reserve(static_cast<std::size_t>(list.Count));
+    for (int i = 0; i < list.Count; ++i) {
+      out.emplace_back(list.Msgs[i]);
+      list.Msgs[i] = nullptr;
+    }
+    natsMsgList_Destroy(&list);
+    return out;
+  }
+
+  [[nodiscard]] consumer_info get_consumer_info() const {
+    jsConsumerInfo* raw = nullptr;
+    throw_on_error(natsSubscription_GetConsumerInfo(&raw, sub_.get(), nullptr, nullptr),
+                   "natsSubscription_GetConsumerInfo");
+    std::unique_ptr<jsConsumerInfo, void (*)(jsConsumerInfo*)> holder(raw, jsConsumerInfo_Destroy);
+    consumer_info out;
+    out.stream = raw->Stream != nullptr ? raw->Stream : "";
+    out.name = raw->Name != nullptr ? raw->Name : "";
+    return out;
+  }
+
+  [[nodiscard]] std::optional<consumer_sequence_mismatch> get_sequence_mismatch() const {
+    jsConsumerSequenceMismatch mismatch{};
+    throw_on_error(natsSubscription_GetSequenceMismatch(&mismatch, sub_.get()), "natsSubscription_GetSequenceMismatch");
+    if (!mismatch.ConsumerClient && !mismatch.Stream && !mismatch.ConsumerServer) {
+      return std::nullopt;
+    }
+    return consumer_sequence_mismatch{mismatch.Stream, mismatch.ConsumerClient, mismatch.ConsumerServer};
+  }
+
+
  private:
   void release_callback() noexcept {
     if (on_release_) {
@@ -166,6 +259,8 @@ class subscription {
 
   std::unique_ptr<natsSubscription, detail::subscription_deleter> sub_;
   std::function<void()> on_release_;
+  std::unordered_map<void*, std::shared_ptr<std::function<void()>>> completion_callbacks_;
+  std::mutex completion_callbacks_mutex_;
 };
 
 }  // namespace natscpp
