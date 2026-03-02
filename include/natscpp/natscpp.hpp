@@ -2,6 +2,7 @@
 
 #include <natscpp/connection.hpp>
 #include <natscpp/error.hpp>
+#include <natscpp/header.hpp>
 #include <natscpp/jetstream.hpp>
 #include <natscpp/kv.hpp>
 #include <natscpp/message.hpp>
