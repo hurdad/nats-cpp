@@ -58,6 +58,7 @@ struct stream_info {
  * @brief High-level consumer metadata.
  */
 struct consumer_info {
+  std::string stream_name;
   std::string durable_name;
 };
 
@@ -229,6 +230,100 @@ class jetstream {
   }
 
   [[nodiscard]] consumer_info create_consumer_group(const js_consumer_config& config) {
+    return upsert_consumer_group(config, false);
+  }
+
+  [[nodiscard]] consumer_info update_consumer_group(const js_consumer_config& config) {
+    return upsert_consumer_group(config, true);
+  }
+
+  [[nodiscard]] consumer_info get_consumer_group(std::string_view stream, std::string_view durable_name) {
+    if (stream.empty()) {
+      throw std::invalid_argument("consumer stream cannot be empty");
+    }
+    if (durable_name.empty()) {
+      throw std::invalid_argument("consumer durable name cannot be empty");
+    }
+
+    jsConsumerInfo* consumer_info_raw{};
+    throw_on_error(js_GetConsumerInfo(&consumer_info_raw, ctx_, std::string(stream).c_str(),
+                                      std::string(durable_name).c_str(), nullptr, nullptr),
+                   "js_GetConsumerInfo");
+
+    consumer_info out{};
+    if (consumer_info_raw != nullptr) {
+      out.stream_name = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : "";
+      out.durable_name = consumer_info_raw->Name != nullptr ? consumer_info_raw->Name : "";
+      jsConsumerInfo_Destroy(consumer_info_raw);
+    }
+
+    return out;
+  }
+
+  void delete_consumer_group(std::string_view stream, std::string_view durable_name) {
+    if (stream.empty()) {
+      throw std::invalid_argument("consumer stream cannot be empty");
+    }
+    if (durable_name.empty()) {
+      throw std::invalid_argument("consumer durable name cannot be empty");
+    }
+
+    throw_on_error(js_DeleteConsumer(ctx_, std::string(stream).c_str(), std::string(durable_name).c_str(), nullptr,
+                                     nullptr),
+                   "js_DeleteConsumer");
+  }
+
+  [[nodiscard]] std::vector<consumer_info> list_consumer_groups(std::string_view stream) {
+    if (stream.empty()) {
+      throw std::invalid_argument("consumer stream cannot be empty");
+    }
+
+    jsConsumerInfoList* consumer_info_list_raw{};
+    throw_on_error(js_Consumers(&consumer_info_list_raw, ctx_, std::string(stream).c_str(), nullptr, nullptr),
+                   "js_Consumers");
+
+    std::vector<consumer_info> out;
+    if (consumer_info_list_raw != nullptr) {
+      out.reserve(static_cast<std::size_t>(consumer_info_list_raw->Count));
+      for (int i = 0; i < consumer_info_list_raw->Count; ++i) {
+        const jsConsumerInfo* current = consumer_info_list_raw->List[i];
+        if (current == nullptr) {
+          continue;
+        }
+        out.push_back({
+            .stream_name = current->Stream != nullptr ? current->Stream : "",
+            .durable_name = current->Name != nullptr ? current->Name : "",
+        });
+      }
+      jsConsumerInfoList_Destroy(consumer_info_list_raw);
+    }
+
+    return out;
+  }
+
+  [[nodiscard]] std::vector<std::string> list_consumer_group_names(std::string_view stream) {
+    if (stream.empty()) {
+      throw std::invalid_argument("consumer stream cannot be empty");
+    }
+
+    jsConsumerNamesList* consumer_names_list_raw{};
+    throw_on_error(js_ConsumerNames(&consumer_names_list_raw, ctx_, std::string(stream).c_str(), nullptr, nullptr),
+                   "js_ConsumerNames");
+
+    std::vector<std::string> out;
+    if (consumer_names_list_raw != nullptr) {
+      out.reserve(static_cast<std::size_t>(consumer_names_list_raw->Count));
+      for (int i = 0; i < consumer_names_list_raw->Count; ++i) {
+        out.emplace_back(consumer_names_list_raw->List[i] != nullptr ? consumer_names_list_raw->List[i] : "");
+      }
+      jsConsumerNamesList_Destroy(consumer_names_list_raw);
+    }
+
+    return out;
+  }
+
+ private:
+  [[nodiscard]] consumer_info upsert_consumer_group(const js_consumer_config& config, bool update) {
     if (config.stream.empty()) {
       throw std::invalid_argument("consumer stream cannot be empty");
     }
@@ -248,16 +343,29 @@ class jetstream {
     }
 
     jsConsumerInfo* consumer_info_raw{};
-    throw_on_error(js_AddConsumer(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr, nullptr),
-                   "js_AddConsumer");
+    if (update) {
+      throw_on_error(
+          js_UpdateConsumer(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr, nullptr),
+          "js_UpdateConsumer");
+    } else {
+      throw_on_error(js_AddConsumer(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr,
+                                    nullptr),
+                     "js_AddConsumer");
+    }
+
+    consumer_info out{
+        .stream_name = config.stream,
+        .durable_name = config.durable_name,
+    };
     if (consumer_info_raw != nullptr) {
+      out.stream_name = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : out.stream_name;
+      out.durable_name = consumer_info_raw->Name != nullptr ? consumer_info_raw->Name : out.durable_name;
       jsConsumerInfo_Destroy(consumer_info_raw);
     }
 
-    return consumer_info{.durable_name = config.durable_name};
+    return out;
   }
 
- private:
   jsCtx* ctx_{};
 };
 
