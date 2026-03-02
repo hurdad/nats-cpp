@@ -38,32 +38,24 @@ void test_throw_on_error_reports_status_and_context() {
 
 
 void test_header_wrappers() {
-  natscpp::header h;
-  assert(natscpp::natsHeader_New(h) == NATS_OK);
+  auto h = natscpp::header::create();
+  assert(h.valid());
 
-  assert(natscpp::natsHeader_Set(h, "x-test", "v1") == NATS_OK);
-  assert(natscpp::natsHeader_Add(h, "x-test", "v2") == NATS_OK);
+  h.set("x-test", "v1");
+  h.add("x-test", "v2");
 
-  const char* first = nullptr;
-  assert(natscpp::natsHeader_Get(h, "x-test", &first) == NATS_OK);
-  assert(first != nullptr);
-  assert(std::string(first) == "v1");
+  assert(h.get("x-test") == "v1");
 
-  const char** values = nullptr;
-  int value_count = 0;
-  assert(natscpp::natsHeader_Values(h, "x-test", &values, &value_count) == NATS_OK);
-  assert(value_count == 2);
-  std::free(const_cast<char**>(values));
+  const auto values = h.values("x-test");
+  assert(values.size() == 2);
 
-  const char** keys = nullptr;
-  int key_count = 0;
-  assert(natscpp::natsHeader_Keys(h, &keys, &key_count) == NATS_OK);
-  assert(key_count == 1);
-  std::free(const_cast<char**>(keys));
+  const auto keys = h.keys();
+  assert(keys.size() == 1);
+  assert(keys[0] == "x-test");
 
-  assert(natscpp::natsHeader_KeysCount(h) == 1);
-  assert(natscpp::natsHeader_Delete(h, "x-test") == NATS_OK);
-  natscpp::natsHeader_Destroy(h);
+  assert(h.keys_count() == 1);
+  h.erase("x-test");
+  h.destroy();
   assert(!h.valid());
 }
 
@@ -251,14 +243,23 @@ void test_connection_has_sync_and_async_apis() {
     natscpp::nats_Sleep(1);
     natscpp::nats_Sleep(std::chrono::milliseconds(1));
   });
-  static_assert(requires(natscpp::header h, const char** one, const char*** many, int* count) {
-    natscpp::natsHeader_New(h);
+  static_assert(requires(natscpp::header h) {
+    { natscpp::header::create() } -> std::same_as<natscpp::header>;
+    { natscpp::natsHeader_New() } -> std::same_as<natscpp::header>;
+    h.set("k", "v");
+    h.add("k", "v2");
+    { h.get("k") } -> std::convertible_to<std::string>;
+    { h.values("k") } -> std::same_as<std::vector<std::string>>;
+    { h.keys() } -> std::same_as<std::vector<std::string>>;
+    { h.keys_count() } -> std::same_as<int>;
+    h.erase("k");
+    h.destroy();
     natscpp::natsHeader_Set(h, "k", "v");
     natscpp::natsHeader_Add(h, "k", "v2");
-    natscpp::natsHeader_Get(h, "k", one);
-    natscpp::natsHeader_Values(h, "k", many, count);
-    natscpp::natsHeader_Keys(h, many, count);
-    natscpp::natsHeader_KeysCount(h);
+    { natscpp::natsHeader_Get(h, "k") } -> std::convertible_to<std::string>;
+    { natscpp::natsHeader_Values(h, "k") } -> std::same_as<std::vector<std::string>>;
+    { natscpp::natsHeader_Keys(h) } -> std::same_as<std::vector<std::string>>;
+    { natscpp::natsHeader_KeysCount(h) } -> std::same_as<int>;
     natscpp::natsHeader_Delete(h, "k");
     natscpp::natsHeader_Destroy(h);
   });

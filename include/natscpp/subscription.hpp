@@ -200,6 +200,16 @@ class subscription {
       std::lock_guard<std::mutex> lock(completion_callbacks_mutex_);
       completion_callbacks_.erase(token.get());
       throw_on_error(status, "natsSubscription_SetOnCompleteCB");
+    } else {
+      // nats.c only stores one on-complete callback; prune any previously registered tokens.
+      std::lock_guard<std::mutex> lock(completion_callbacks_mutex_);
+      for (auto it = completion_callbacks_.begin(); it != completion_callbacks_.end();) {
+        if (it->first != token.get()) {
+          it = completion_callbacks_.erase(it);
+        } else {
+          ++it;
+        }
+      }
     }
   }
 
@@ -207,6 +217,7 @@ class subscription {
     natsMsgList list{};
     throw_on_error(natsSubscription_Fetch(&list, sub_.get(), batch, static_cast<int64_t>(timeout.count()), nullptr),
                    "natsSubscription_Fetch");
+    struct list_guard { natsMsgList& l; ~list_guard() { natsMsgList_Destroy(&l); } } guard{list};
 
     std::vector<message> out;
     out.reserve(static_cast<std::size_t>(list.Count));
@@ -214,13 +225,13 @@ class subscription {
       out.emplace_back(list.Msgs[i]);
       list.Msgs[i] = nullptr;
     }
-    natsMsgList_Destroy(&list);
     return out;
   }
 
   [[nodiscard]] std::vector<message> fetch_request(jsFetchRequest& request) {
     natsMsgList list{};
     throw_on_error(natsSubscription_FetchRequest(&list, sub_.get(), &request), "natsSubscription_FetchRequest");
+    struct list_guard { natsMsgList& l; ~list_guard() { natsMsgList_Destroy(&l); } } guard{list};
 
     std::vector<message> out;
     out.reserve(static_cast<std::size_t>(list.Count));
@@ -228,7 +239,6 @@ class subscription {
       out.emplace_back(list.Msgs[i]);
       list.Msgs[i] = nullptr;
     }
-    natsMsgList_Destroy(&list);
     return out;
   }
 

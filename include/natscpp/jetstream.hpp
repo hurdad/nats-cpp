@@ -15,11 +15,6 @@
 
 namespace natscpp {
 
-class jetstream_not_available : public std::runtime_error {
- public:
-  jetstream_not_available() : std::runtime_error("JetStream symbols are not available in linked nats.c") {}
-};
-
 /**
  * @brief Options used for JetStream publish operations.
  */
@@ -284,6 +279,10 @@ class jetstream {
 
     std::vector<consumer_info> out;
     if (consumer_info_list_raw != nullptr) {
+      struct list_guard {
+        jsConsumerInfoList* l;
+        ~list_guard() { jsConsumerInfoList_Destroy(l); }
+      } guard{consumer_info_list_raw};
       out.reserve(static_cast<std::size_t>(consumer_info_list_raw->Count));
       for (int i = 0; i < consumer_info_list_raw->Count; ++i) {
         const jsConsumerInfo* current = consumer_info_list_raw->List[i];
@@ -295,7 +294,6 @@ class jetstream {
             .durable_name = current->Name != nullptr ? current->Name : "",
         });
       }
-      jsConsumerInfoList_Destroy(consumer_info_list_raw);
     }
 
     return out;
@@ -312,11 +310,14 @@ class jetstream {
 
     std::vector<std::string> out;
     if (consumer_names_list_raw != nullptr) {
+      struct list_guard {
+        jsConsumerNamesList* l;
+        ~list_guard() { jsConsumerNamesList_Destroy(l); }
+      } guard{consumer_names_list_raw};
       out.reserve(static_cast<std::size_t>(consumer_names_list_raw->Count));
       for (int i = 0; i < consumer_names_list_raw->Count; ++i) {
         out.emplace_back(consumer_names_list_raw->List[i] != nullptr ? consumer_names_list_raw->List[i] : "");
       }
-      jsConsumerNamesList_Destroy(consumer_names_list_raw);
     }
 
     return out;

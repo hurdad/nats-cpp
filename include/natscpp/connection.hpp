@@ -120,25 +120,32 @@ class connection {
   connection(const connection&) = delete;
   connection& operator=(const connection&) = delete;
 
+  connection(connection&&) noexcept = default;
+  connection& operator=(connection&&) noexcept = default;
+
   void connect(const connection_options& options = {}) {
     natsConnection* raw{};
     natsOptions* nopts = nullptr;
     throw_on_error(natsOptions_Create(&nopts), "natsOptions_Create");
     std::unique_ptr<natsOptions, void (*)(natsOptions*)> holder(nopts, natsOptions_Destroy);
     throw_on_error(natsOptions_SetURL(nopts, options.url.c_str()), "natsOptions_SetURL");
-    callback_handlers_.closed_cb = options.closed_cb;
-    callback_handlers_.disconnected_cb = options.disconnected_cb;
-    callback_handlers_.reconnected_cb = options.reconnected_cb;
-    callback_handlers_.error_handler = options.error_handler;
-    callback_handlers_.lame_duck_mode_cb = options.lame_duck_mode_cb;
 
-    apply_nats_options(nopts, options, &callback_handlers_);
+    // Build handlers on the heap so the pointer stored in nats.c remains valid after a move.
+    auto handlers = std::make_unique<callback_handlers>();
+    handlers->closed_cb = options.closed_cb;
+    handlers->disconnected_cb = options.disconnected_cb;
+    handlers->reconnected_cb = options.reconnected_cb;
+    handlers->error_handler = options.error_handler;
+    handlers->lame_duck_mode_cb = options.lame_duck_mode_cb;
+
+    apply_nats_options(nopts, options, handlers.get());
     if (options.retry_on_failed_connect) {
       throw_on_error(natsOptions_SetRetryOnFailedConnect(nopts, true, nullptr, nullptr),
                      "natsOptions_SetRetryOnFailedConnect");
     }
     throw_on_error(natsConnection_Connect(&raw, nopts), "natsConnection_Connect");
     conn_.reset(raw, detail::connection_deleter{});
+    callback_handlers_ = std::move(handlers);
   }
 
   [[nodiscard]] bool connected() const noexcept { return conn_ != nullptr; }
@@ -153,7 +160,9 @@ class connection {
   }
 
   [[nodiscard]] uint64_t buffered_bytes() const noexcept {
-    return conn_ != nullptr ? natsConnection_Buffered(conn_.get()) : 0;
+    if (conn_ == nullptr) return 0;
+    const int n = natsConnection_Buffered(conn_.get());
+    return n >= 0 ? static_cast<uint64_t>(n) : 0;
   }
 
   void publish(std::string_view subject, std::string_view payload) {
@@ -639,7 +648,7 @@ class connection {
 
   std::shared_ptr<natsConnection> conn_;
   std::shared_ptr<callback_state> callback_state_ = std::make_shared<callback_state>();
-  callback_handlers callback_handlers_;
+  std::unique_ptr<callback_handlers> callback_handlers_;
 };
 
 }  // namespace natscpp

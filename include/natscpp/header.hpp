@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <natscpp/detail/deleters.hpp>
+#include <natscpp/error.hpp>
 
 namespace natscpp {
 
@@ -17,36 +18,60 @@ class header {
   header() = default;
   explicit header(natsHeader* raw) : header_(raw) {}
 
-  static natsStatus create(header& new_header) {
+  [[nodiscard]] static header create() {
     natsHeader* raw = nullptr;
-    const natsStatus status = ::natsHeader_New(&raw);
-    if (status == NATS_OK) {
-      new_header.reset(raw);
+    throw_on_error(::natsHeader_New(&raw), "natsHeader_New");
+    return header{raw};
+  }
+
+  void set(std::string_view key, std::string_view value) {
+    throw_on_error(::natsHeader_Set(native_handle(), std::string(key).c_str(), std::string(value).c_str()),
+                   "natsHeader_Set");
+  }
+
+  void add(std::string_view key, std::string_view value) {
+    throw_on_error(::natsHeader_Add(native_handle(), std::string(key).c_str(), std::string(value).c_str()),
+                   "natsHeader_Add");
+  }
+
+  [[nodiscard]] std::string get(std::string_view key) const {
+    const char* value = nullptr;
+    throw_on_error(::natsHeader_Get(native_handle(), std::string(key).c_str(), &value), "natsHeader_Get");
+    return value != nullptr ? std::string{value} : std::string{};
+  }
+
+  [[nodiscard]] std::vector<std::string> values(std::string_view key) const {
+    const char** vals = nullptr;
+    int count = 0;
+    throw_on_error(::natsHeader_Values(native_handle(), std::string(key).c_str(), &vals, &count),
+                   "natsHeader_Values");
+    struct array_free { const char** p; ~array_free() { std::free(const_cast<char**>(p)); } } guard{vals};
+    std::vector<std::string> out;
+    out.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i) {
+      out.emplace_back(vals[i] != nullptr ? vals[i] : "");
     }
-    return status;
+    return out;
   }
 
-  natsStatus set(std::string_view key, std::string_view value) {
-    return ::natsHeader_Set(native_handle(), std::string(key).c_str(), std::string(value).c_str());
+  [[nodiscard]] std::vector<std::string> keys() const {
+    const char** ks = nullptr;
+    int count = 0;
+    throw_on_error(::natsHeader_Keys(native_handle(), &ks, &count), "natsHeader_Keys");
+    struct array_free { const char** p; ~array_free() { std::free(const_cast<char**>(p)); } } guard{ks};
+    std::vector<std::string> out;
+    out.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i) {
+      out.emplace_back(ks[i] != nullptr ? ks[i] : "");
+    }
+    return out;
   }
 
-  natsStatus add(std::string_view key, std::string_view value) {
-    return ::natsHeader_Add(native_handle(), std::string(key).c_str(), std::string(value).c_str());
+  [[nodiscard]] int keys_count() const { return ::natsHeader_KeysCount(native_handle()); }
+
+  void erase(std::string_view key) {
+    throw_on_error(::natsHeader_Delete(native_handle(), std::string(key).c_str()), "natsHeader_Delete");
   }
-
-  natsStatus get(std::string_view key, const char** value) const {
-    return ::natsHeader_Get(native_handle(), std::string(key).c_str(), value);
-  }
-
-  natsStatus values(std::string_view key, const char*** values, int* count) const {
-    return ::natsHeader_Values(native_handle(), std::string(key).c_str(), values, count);
-  }
-
-  natsStatus keys(const char*** keys, int* count) const { return ::natsHeader_Keys(native_handle(), keys, count); }
-
-  int keys_count() const { return ::natsHeader_KeysCount(native_handle()); }
-
-  natsStatus erase(std::string_view key) { return ::natsHeader_Delete(native_handle(), std::string(key).c_str()); }
 
   void destroy() { reset(); }
 
@@ -59,34 +84,40 @@ class header {
   std::unique_ptr<natsHeader, detail::header_deleter> header_;
 };
 
-inline natsStatus natsHeader_New(header& new_header) {
-  return header::create(new_header);
+[[nodiscard]] inline header natsHeader_New() {
+  return header::create();
 }
 
-inline natsStatus natsHeader_Set(header& h, std::string_view key, std::string_view value) {
-  return h.set(key, value);
+inline void natsHeader_Set(header& h, std::string_view key, std::string_view value) {
+  h.set(key, value);
 }
 
-inline natsStatus natsHeader_Add(header& h, std::string_view key, std::string_view value) {
-  return h.add(key, value);
+inline void natsHeader_Add(header& h, std::string_view key, std::string_view value) {
+  h.add(key, value);
 }
 
-inline natsStatus natsHeader_Get(const header& h, std::string_view key, const char** value) {
-  return h.get(key, value);
+[[nodiscard]] inline std::string natsHeader_Get(const header& h, std::string_view key) {
+  return h.get(key);
 }
 
-inline natsStatus natsHeader_Values(const header& h, std::string_view key, const char*** values, int* count) {
-  return h.values(key, values, count);
+[[nodiscard]] inline std::vector<std::string> natsHeader_Values(const header& h, std::string_view key) {
+  return h.values(key);
 }
 
-inline natsStatus natsHeader_Keys(const header& h, const char*** keys, int* count) { return h.keys(keys, count); }
-
-inline int natsHeader_KeysCount(const header& h) { return h.keys_count(); }
-
-inline natsStatus natsHeader_Delete(header& h, std::string_view key) {
-  return h.erase(key);
+[[nodiscard]] inline std::vector<std::string> natsHeader_Keys(const header& h) {
+  return h.keys();
 }
 
-inline void natsHeader_Destroy(header& h) { h.destroy(); }
+[[nodiscard]] inline int natsHeader_KeysCount(const header& h) {
+  return h.keys_count();
+}
+
+inline void natsHeader_Delete(header& h, std::string_view key) {
+  h.erase(key);
+}
+
+inline void natsHeader_Destroy(header& h) {
+  h.destroy();
+}
 
 }  // namespace natscpp

@@ -18,7 +18,7 @@ inline bool nats_CheckCompatibility() {
   return ::nats_CheckCompatibilityImpl(NATS_VERSION_REQUIRED_NUMBER, NATS_VERSION_NUMBER, NATS_VERSION_STRING);
 }
 
-inline bool nats_CheckCompatibilityImpl(uint32_t req_ver_number, uint32_t ver_number, std::string_view ver_string) {
+[[nodiscard]] inline bool nats_CheckCompatibilityImpl(uint32_t req_ver_number, uint32_t ver_number, std::string_view ver_string) {
   return ::nats_CheckCompatibilityImpl(req_ver_number, ver_number, std::string(ver_string).c_str());
 }
 

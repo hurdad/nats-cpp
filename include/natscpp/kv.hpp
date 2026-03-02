@@ -3,6 +3,7 @@
 #include <nats/nats.h>
 
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -12,11 +13,6 @@
 #include <natscpp/error.hpp>
 
 namespace natscpp {
-
-class kv_not_available : public std::runtime_error {
- public:
-  kv_not_available() : std::runtime_error("KeyValue symbols are not available in linked nats.c") {}
-};
 
 namespace detail {
 inline void destroy_kv_store(kvStore* kv) {
@@ -236,8 +232,10 @@ class key_value {
   [[nodiscard]] kv_watcher watch(std::string_view key, const kv_watch_options* options = nullptr) const {
     check_valid();
     kvWatcher* watcher{};
-    auto native = to_native_watch_options(options);
-    throw_on_error(kvStore_Watch(&watcher, kv_, std::string(key).c_str(), native), "kvStore_Watch");
+    auto native_opts = to_native_watch_options(options);
+    throw_on_error(kvStore_Watch(&watcher, kv_, std::string(key).c_str(),
+                                 native_opts ? &*native_opts : nullptr),
+                   "kvStore_Watch");
     return kv_watcher{watcher};
   }
 
@@ -250,9 +248,9 @@ class key_value {
     for (const auto& key : keys) {
       key_ptrs.push_back(key.c_str());
     }
-
-    auto native = to_native_watch_options(options);
-    throw_on_error(kvStore_WatchMulti(&watcher, kv_, key_ptrs.data(), static_cast<int>(key_ptrs.size()), native),
+    auto native_opts = to_native_watch_options(options);
+    throw_on_error(kvStore_WatchMulti(&watcher, kv_, key_ptrs.data(), static_cast<int>(key_ptrs.size()),
+                                      native_opts ? &*native_opts : nullptr),
                    "kvStore_WatchMulti");
     return kv_watcher{watcher};
   }
@@ -260,8 +258,8 @@ class key_value {
   [[nodiscard]] kv_watcher watch_all(const kv_watch_options* options = nullptr) const {
     check_valid();
     kvWatcher* watcher{};
-    auto native = to_native_watch_options(options);
-    throw_on_error(kvStore_WatchAll(&watcher, kv_, native), "kvStore_WatchAll");
+    auto native_opts = to_native_watch_options(options);
+    throw_on_error(kvStore_WatchAll(&watcher, kv_, native_opts ? &*native_opts : nullptr), "kvStore_WatchAll");
     return kv_watcher{watcher};
   }
 
@@ -318,12 +316,12 @@ class key_value {
     check_valid();
     kvKeysList list{};
     throw_on_error(kvStore_Keys(&list, kv_, nullptr), "kvStore_Keys");
+    struct list_guard { kvKeysList& l; ~list_guard() { kvKeysList_Destroy(&l); } } guard{list};
     std::vector<std::string> out;
     out.reserve(static_cast<std::size_t>(list.Count));
     for (int i = 0; i < list.Count; ++i) {
       out.emplace_back(list.Keys[i] != nullptr ? list.Keys[i] : "");
     }
-    kvKeysList_Destroy(&list);
     return out;
   }
 
@@ -356,19 +354,18 @@ class key_value {
     }
   }
 
-  [[nodiscard]] static const kvWatchOptions* to_native_watch_options(const kv_watch_options* options) {
+  [[nodiscard]] static std::optional<kvWatchOptions> to_native_watch_options(const kv_watch_options* options) {
     if (options == nullptr) {
-      return nullptr;
+      return std::nullopt;
     }
-
-    thread_local kvWatchOptions native{};
+    kvWatchOptions native{};
     throw_on_error(kvWatchOptions_Init(&native), "kvWatchOptions_Init");
     native.IgnoreDeletes = options->ignore_deletes;
     native.IncludeHistory = options->include_history;
     native.MetaOnly = options->meta_only;
     native.Timeout = options->timeout;
     native.UpdatesOnly = options->updates_only;
-    return &native;
+    return native;
   }
 
   void destroy_self() noexcept {
