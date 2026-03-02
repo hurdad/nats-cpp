@@ -24,22 +24,26 @@ class message {
   [[nodiscard]] bool valid() const noexcept { return msg_ != nullptr; }
 
   [[nodiscard]] std::string_view subject() const noexcept {
+    if (!msg_) return {};
     const char* v = natsMsg_GetSubject(msg_.get());
     return v != nullptr ? std::string_view{v} : std::string_view{};
   }
 
   [[nodiscard]] std::string_view reply_to() const noexcept {
+    if (!msg_) return {};
     const char* v = natsMsg_GetReply(msg_.get());
     return v != nullptr ? std::string_view{v} : std::string_view{};
   }
 
   [[nodiscard]] std::string_view data() const noexcept {
+    if (!msg_) return {};
     const char* bytes = reinterpret_cast<const char*>(natsMsg_GetData(msg_.get()));
     const int len = natsMsg_GetDataLength(msg_.get());
     return bytes != nullptr && len >= 0 ? std::string_view{bytes, static_cast<std::size_t>(len)} : std::string_view{};
   }
 
   [[nodiscard]] std::string header(std::string_view key) const {
+    if (!msg_) return {};
     const char* val = nullptr;
     if (natsMsgHeader_Get(msg_.get(), std::string(key).c_str(), &val) != NATS_OK || val == nullptr) {
       return {};
@@ -48,6 +52,7 @@ class message {
   }
 
   void set_header(std::string_view key, std::string_view value) {
+    if (!msg_) return;
     throw_on_error(natsMsgHeader_Set(msg_.get(), std::string(key).c_str(), std::string(value).c_str()),
                    "natsMsgHeader_Set");
   }

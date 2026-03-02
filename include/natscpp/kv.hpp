@@ -107,7 +107,8 @@ class kv_entry {
 
     const char* value = static_cast<const char*>(value_getter(entry_));
     int len = len_getter(entry_);
-    if (value == nullptr || len <= 0) {
+    // Only treat a null pointer as "no value"; len == 0 is a valid empty string.
+    if (value == nullptr || len < 0) {
       return {};
     }
     return {value, static_cast<std::size_t>(len)};
@@ -130,7 +131,7 @@ class key_value {
  public:
   key_value() = default;
 
-  key_value(connection& conn, std::string_view bucket) {
+  key_value(const connection& conn, std::string_view bucket) {
     using js_create_fn = natsStatus (*)(jsCtx**, natsConnection*, jsOptions*);
     using kv_open_fn = natsStatus (*)(kvStore**, jsCtx*, const char*);
 

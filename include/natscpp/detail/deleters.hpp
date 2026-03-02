@@ -28,12 +28,4 @@ struct msg_deleter {
   }
 };
 
-struct options_deleter {
-  void operator()(natsOptions* ptr) const noexcept {
-    if (ptr != nullptr) {
-      natsOptions_Destroy(ptr);
-    }
-  }
-};
-
 }  // namespace natscpp::detail

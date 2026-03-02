@@ -2,10 +2,12 @@
 
 #include <nats/nats.h>
 
+#include <cassert>
 #include <chrono>
 #include <cstdio>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -48,6 +50,8 @@ class connection {
   [[nodiscard]] natsConnection* native_handle() const noexcept { return conn_.get(); }
 
   void publish(std::string_view subject, std::string_view payload) {
+    assert(payload.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
+           "publish: payload exceeds INT_MAX bytes");
     throw_on_error(natsConnection_Publish(conn_.get(), std::string(subject).c_str(), payload.data(),
                                           static_cast<int>(payload.size())),
                    "natsConnection_Publish");
@@ -171,6 +175,8 @@ class connection {
 
   [[nodiscard]] message request_sync(std::string_view subject, std::string_view payload,
                                      std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+    assert(payload.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
+           "request_sync: payload exceeds INT_MAX bytes");
     natsMsg* reply{};
     throw_on_error(natsConnection_Request(&reply, conn_.get(), std::string(subject).c_str(), payload.data(),
                                           static_cast<int>(payload.size()), static_cast<int64_t>(timeout.count())),
@@ -185,6 +191,8 @@ class connection {
 
   [[nodiscard]] std::future<message> request_async(
       std::string subject, std::string payload, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+    assert(payload.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
+           "request_async: payload exceeds INT_MAX bytes");
     auto conn_ref = conn_;  // extend connection lifetime across the async call
     return std::async(std::launch::async,
                       [conn_ref, subject = std::move(subject), payload = std::move(payload), timeout]() {
