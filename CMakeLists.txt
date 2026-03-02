@@ -43,6 +43,15 @@ else()
   endif()
 endif()
 
+
+include(CTest)
+
+if(BUILD_TESTING)
+  add_executable(natscpp_unit_tests tests/unit_tests.cpp)
+  target_link_libraries(natscpp_unit_tests PRIVATE natscpp::natscpp)
+  add_test(NAME natscpp_unit_tests COMMAND natscpp_unit_tests)
+endif()
+
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
