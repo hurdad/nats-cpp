@@ -3,13 +3,16 @@
 #include <natscpp/jetstream.hpp>
 #include <natscpp/message.hpp>
 #include <natscpp/kv.hpp>
+#include <natscpp/trace.hpp>
 
 #include <cassert>
 #include <chrono>
 #include <functional>
 #include <future>
 #include <iostream>
+#include <map>
 #include <string>
+#include <vector>
 
 #include <natscpp/connection.hpp>
 
@@ -310,6 +313,66 @@ void test_new_inbox_generates_unique_subjects() {
   assert(a != b);
 }
 
+void test_trace_carrier_concept_and_helpers() {
+  struct map_trace_carrier {
+    std::map<std::string, std::string> headers;
+
+    void set(std::string_view key, std::string_view value) { headers[std::string(key)] = std::string(value); }
+    [[nodiscard]] std::string get(std::string_view key) const {
+      auto it = headers.find(std::string(key));
+      return it == headers.end() ? std::string{} : it->second;
+    }
+  };
+
+  static_assert(natscpp::TraceCarrier<map_trace_carrier>);
+
+  map_trace_carrier carrier;
+  const std::vector<std::pair<std::string_view, std::string_view>> injected{
+      {"traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736"},
+      {"tracestate", "rojo=00f067aa0ba902b7"},
+  };
+  natscpp::inject_trace_context(carrier, injected);
+
+  assert(carrier.get("traceparent") == "00-4bf92f3577b34da6a3ce929d0e0e4736");
+  assert(carrier.get("tracestate") == "rojo=00f067aa0ba902b7");
+
+  const std::vector<std::string_view> keys{"traceparent", "tracestate", "missing"};
+  std::map<std::string, std::string> extracted;
+  natscpp::extract_trace_context(carrier, keys, extracted);
+
+  assert(extracted.size() == 2);
+  assert(extracted["traceparent"] == "00-4bf92f3577b34da6a3ce929d0e0e4736");
+  assert(extracted["tracestate"] == "rojo=00f067aa0ba902b7");
+  assert(extracted.find("missing") == extracted.end());
+}
+
+void test_message_trace_carrier_reads_and_writes_headers() {
+  auto msg = natscpp::message::create("trace.subj", "", "payload");
+  natscpp::message_trace_carrier carrier{msg};
+
+  carrier.set("traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1111111111111111-01");
+  assert(msg.header("traceparent") == "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1111111111111111-01");
+  assert(carrier.get("traceparent") == "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1111111111111111-01");
+  assert(carrier.get("missing").empty());
+
+  const std::vector<std::pair<std::string_view, std::string_view>> injected{
+      {"tracestate", "congo=t61rcWkgMzE"},
+      {"baggage", "k1=v1"},
+  };
+  natscpp::inject_trace_context(carrier, injected);
+  assert(msg.header("tracestate") == "congo=t61rcWkgMzE");
+  assert(msg.header("baggage") == "k1=v1");
+
+  const std::vector<std::string_view> keys{"traceparent", "tracestate", "baggage"};
+  std::map<std::string, std::string> extracted;
+  natscpp::extract_trace_context(carrier, keys, extracted);
+
+  assert(extracted.size() == 3);
+  assert(extracted["traceparent"] == "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1111111111111111-01");
+  assert(extracted["tracestate"] == "congo=t61rcWkgMzE");
+  assert(extracted["baggage"] == "k1=v1");
+}
+
 // ---------------------------------------------------------------------------
 // Additional integration tests (skip if no NATS server)
 // ---------------------------------------------------------------------------
@@ -560,6 +623,8 @@ int main() {
   test_subscription_default_constructor();
   test_new_inbox_generates_unique_subjects();
   test_connection_has_sync_and_async_apis();
+  test_trace_carrier_concept_and_helpers();
+  test_message_trace_carrier_reads_and_writes_headers();
   test_connection_state_accessors_if_server_available();
   test_connection_sync_and_async_roundtrip_if_server_available();
   test_publish_request_variants_if_server_available();
