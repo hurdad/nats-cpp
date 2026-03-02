@@ -69,6 +69,9 @@ if(NATSCPP_BUILD_EXAMPLES)
 
   add_executable(natscpp_kv_example examples/kv_example.cpp)
   target_link_libraries(natscpp_kv_example PRIVATE natscpp::natscpp)
+
+  add_executable(natscpp_request_reply_example examples/request_reply_example.cpp)
+  target_link_libraries(natscpp_request_reply_example PRIVATE natscpp::natscpp)
 endif()
 
 include(CMakePackageConfigHelpers)

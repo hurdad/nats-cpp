@@ -82,6 +82,9 @@ sub.unsubscribe();
 - Synchronous request/reply: `request_sync` (alias: `request`)
 - Asynchronous request/reply: `request_async`, `request_awaitable`
 
+Request/reply example is available in:
+- `examples/request_reply_example.cpp`
+
 ## JetStream
 
 ```cpp
