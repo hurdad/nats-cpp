@@ -160,12 +160,12 @@ kv.erase("user-1");
 int main() {
   natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
 
-  // Bucket must already exist (for example: `nats kv add demo_profiles`).
-  natscpp::key_value kv(nc, "demo_profiles");
+  auto kv = natscpp::key_value::create(nc, "demo_profiles");
 
   auto rev = kv.put("user-1", R"({"name":"Ada"})");
   auto entry = kv.get("user-1");
   kv.erase("user-1");
+  natscpp::key_value::delete_bucket(nc, "demo_profiles");
   return rev > 0 && entry.key() == "user-1" ? 0 : 1;
 }
 ```
