@@ -171,6 +171,29 @@ void test_connection_has_sync_and_async_apis() {
   });
   static_assert(requires { nc.request_sync("svc", "payload"); });
   static_assert(requires { nc.request_async("svc", "payload"); });
+  static_assert(requires(natscpp::connection_options opts, natsSignatureHandler sig_cb, void* closure,
+                         std::function<void(natsConnection*)> conn_cb,
+                         std::function<void(natsConnection*, natsSubscription*, natsStatus)> err_cb) {
+    natscpp::natsOptions_SetToken(opts, "token");
+    natscpp::natsOptions_SetNKey(opts, "PUB", sig_cb, closure);
+    natscpp::natsOptions_SetUserCredentialsFromFiles(opts, "user.creds", "seed.txt");
+    natscpp::natsOptions_SetUserInfo(opts, "user", "pwd");
+    natscpp::natsOptions_SetSecure(opts, true);
+    natscpp::natsOptions_LoadCATrustedCertificates(opts, "ca.pem");
+    natscpp::natsOptions_LoadCertificatesChain(opts, "cert.pem", "key.pem");
+    natscpp::natsOptions_SkipServerVerification(opts, true);
+    natscpp::natsOptions_SetClosedCB(opts, conn_cb);
+    natscpp::natsOptions_SetDisconnectedCB(opts, conn_cb);
+    natscpp::natsOptions_SetReconnectedCB(opts, conn_cb);
+    natscpp::natsOptions_SetErrorHandler(opts, err_cb);
+    natscpp::natsOptions_SetLameDuckModeCB(opts, conn_cb);
+    natscpp::natsOptions_SetReconnectWait(opts, std::chrono::milliseconds(100));
+    natscpp::natsOptions_SetMaxReconnect(opts, 10);
+    natscpp::natsOptions_SetPingInterval(opts, std::chrono::seconds(1));
+    natscpp::natsOptions_SetTimeout(opts, std::chrono::seconds(2));
+    natscpp::natsOptions_SetName(opts, "cpp-client");
+    natscpp::natsOptions_SetNoEcho(opts, true);
+  });
   static_assert(requires(natscpp::message m) { m.ack_sync(); m.nak_with_delay(std::chrono::milliseconds(10)); m.get_metadata(); });
   static_assert(requires(natscpp::subscription s, jsFetchRequest& req) {
     s.drain_completion_status();
