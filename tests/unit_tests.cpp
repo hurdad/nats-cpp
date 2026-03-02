@@ -207,25 +207,25 @@ void test_connection_has_sync_and_async_apis() {
   static_assert(requires(natscpp::connection_options opts, natsSignatureHandler sig_cb, void* closure,
                          std::function<void(natsConnection*)> conn_cb,
                          std::function<void(natsConnection*, natsSubscription*, natsStatus)> err_cb) {
-    natscpp::natsOptions_SetToken(opts, "token");
-    natscpp::natsOptions_SetNKey(opts, "PUB", sig_cb, closure);
-    natscpp::natsOptions_SetUserCredentialsFromFiles(opts, "user.creds", "seed.txt");
-    natscpp::natsOptions_SetUserInfo(opts, "user", "pwd");
-    natscpp::natsOptions_SetSecure(opts, true);
-    natscpp::natsOptions_LoadCATrustedCertificates(opts, "ca.pem");
-    natscpp::natsOptions_LoadCertificatesChain(opts, "cert.pem", "key.pem");
-    natscpp::natsOptions_SkipServerVerification(opts, true);
-    natscpp::natsOptions_SetClosedCB(opts, conn_cb);
-    natscpp::natsOptions_SetDisconnectedCB(opts, conn_cb);
-    natscpp::natsOptions_SetReconnectedCB(opts, conn_cb);
-    natscpp::natsOptions_SetErrorHandler(opts, err_cb);
-    natscpp::natsOptions_SetLameDuckModeCB(opts, conn_cb);
-    natscpp::natsOptions_SetReconnectWait(opts, std::chrono::milliseconds(100));
-    natscpp::natsOptions_SetMaxReconnect(opts, 10);
-    natscpp::natsOptions_SetPingInterval(opts, std::chrono::seconds(1));
-    natscpp::natsOptions_SetTimeout(opts, std::chrono::seconds(2));
-    natscpp::natsOptions_SetName(opts, "cpp-client");
-    natscpp::natsOptions_SetNoEcho(opts, true);
+    opts.set_token("token");
+    opts.set_nkey("PUB", sig_cb, closure);
+    opts.set_user_credentials_from_files("user.creds", "seed.txt");
+    opts.set_user_info("user", "pwd");
+    opts.set_secure(true);
+    opts.load_ca_trusted_certificates("ca.pem");
+    opts.load_certificates_chain("cert.pem", "key.pem");
+    opts.set_skip_server_verification(true);
+    opts.set_closed_cb(conn_cb);
+    opts.set_disconnected_cb(conn_cb);
+    opts.set_reconnected_cb(conn_cb);
+    opts.set_error_handler(err_cb);
+    opts.set_lame_duck_mode_cb(conn_cb);
+    opts.set_reconnect_wait(std::chrono::milliseconds(100));
+    opts.set_max_reconnect(10);
+    opts.set_ping_interval(std::chrono::seconds(1));
+    opts.set_timeout(std::chrono::seconds(2));
+    opts.set_name("cpp-client");
+    opts.set_no_echo(true);
   });
   static_assert(requires(natscpp::message m) { m.ack_sync(); m.nak_with_delay(std::chrono::milliseconds(10)); m.get_metadata(); });
   static_assert(requires(char* buffer, size_t buf_len, FILE* stream, natsClientConfig* cfg,

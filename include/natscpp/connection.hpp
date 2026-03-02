@@ -61,63 +61,42 @@ struct connection_options {
   std::optional<std::chrono::milliseconds> timeout;
   std::optional<std::string> name;
   std::optional<bool> no_echo;
-};
 
-inline void natsOptions_SetToken(connection_options& opts, std::string token) { opts.token = std::move(token); }
-inline void natsOptions_SetNKey(connection_options& opts, std::string nkey_public, natsSignatureHandler sig_cb,
-                                void* sig_closure) {
-  opts.nkey_public = std::move(nkey_public);
-  opts.nkey_signature_cb = sig_cb;
-  opts.nkey_signature_closure = sig_closure;
-}
-inline void natsOptions_SetUserCredentialsFromFiles(connection_options& opts, std::string user_credentials_file,
-                                                    std::string seed_file = {}) {
-  opts.user_credentials_file = std::move(user_credentials_file);
-  opts.user_nkey_seed_file = std::move(seed_file);
-}
-inline void natsOptions_SetUserInfo(connection_options& opts, std::string user, std::string password) {
-  opts.user = std::move(user);
-  opts.password = std::move(password);
-}
-inline void natsOptions_SetSecure(connection_options& opts, bool secure) { opts.secure = secure; }
-inline void natsOptions_LoadCATrustedCertificates(connection_options& opts, std::string file_name) {
-  opts.ca_trusted_certificates_file = std::move(file_name);
-}
-inline void natsOptions_LoadCertificatesChain(connection_options& opts, std::string certs_file, std::string key_file) {
-  opts.certificates_chain_file = std::move(certs_file);
-  opts.private_key_file = std::move(key_file);
-}
-inline void natsOptions_SkipServerVerification(connection_options& opts, bool skip) {
-  opts.skip_server_verification = skip;
-}
-inline void natsOptions_SetClosedCB(connection_options& opts, std::function<void(natsConnection*)> cb) {
-  opts.closed_cb = std::move(cb);
-}
-inline void natsOptions_SetDisconnectedCB(connection_options& opts, std::function<void(natsConnection*)> cb) {
-  opts.disconnected_cb = std::move(cb);
-}
-inline void natsOptions_SetReconnectedCB(connection_options& opts, std::function<void(natsConnection*)> cb) {
-  opts.reconnected_cb = std::move(cb);
-}
-inline void natsOptions_SetErrorHandler(connection_options& opts,
-                                        std::function<void(natsConnection*, natsSubscription*, natsStatus)> cb) {
-  opts.error_handler = std::move(cb);
-}
-inline void natsOptions_SetLameDuckModeCB(connection_options& opts, std::function<void(natsConnection*)> cb) {
-  opts.lame_duck_mode_cb = std::move(cb);
-}
-inline void natsOptions_SetReconnectWait(connection_options& opts, std::chrono::milliseconds reconnect_wait) {
-  opts.reconnect_wait = reconnect_wait;
-}
-inline void natsOptions_SetMaxReconnect(connection_options& opts, int max_reconnect) {
-  opts.max_reconnect = max_reconnect;
-}
-inline void natsOptions_SetPingInterval(connection_options& opts, std::chrono::milliseconds ping_interval) {
-  opts.ping_interval = ping_interval;
-}
-inline void natsOptions_SetTimeout(connection_options& opts, std::chrono::milliseconds timeout) { opts.timeout = timeout; }
-inline void natsOptions_SetName(connection_options& opts, std::string name) { opts.name = std::move(name); }
-inline void natsOptions_SetNoEcho(connection_options& opts, bool no_echo) { opts.no_echo = no_echo; }
+  void set_token(std::string token) { this->token = std::move(token); }
+  void set_nkey(std::string nkey_public, natsSignatureHandler sig_cb, void* sig_closure) {
+    this->nkey_public = std::move(nkey_public);
+    nkey_signature_cb = sig_cb;
+    nkey_signature_closure = sig_closure;
+  }
+  void set_user_credentials_from_files(std::string user_credentials_file, std::string seed_file = {}) {
+    this->user_credentials_file = std::move(user_credentials_file);
+    user_nkey_seed_file = std::move(seed_file);
+  }
+  void set_user_info(std::string user, std::string password) {
+    this->user = std::move(user);
+    this->password = std::move(password);
+  }
+  void set_secure(bool secure) { this->secure = secure; }
+  void load_ca_trusted_certificates(std::string file_name) { ca_trusted_certificates_file = std::move(file_name); }
+  void load_certificates_chain(std::string certs_file, std::string key_file) {
+    certificates_chain_file = std::move(certs_file);
+    private_key_file = std::move(key_file);
+  }
+  void set_skip_server_verification(bool skip) { skip_server_verification = skip; }
+  void set_closed_cb(std::function<void(natsConnection*)> cb) { closed_cb = std::move(cb); }
+  void set_disconnected_cb(std::function<void(natsConnection*)> cb) { disconnected_cb = std::move(cb); }
+  void set_reconnected_cb(std::function<void(natsConnection*)> cb) { reconnected_cb = std::move(cb); }
+  void set_error_handler(std::function<void(natsConnection*, natsSubscription*, natsStatus)> cb) {
+    error_handler = std::move(cb);
+  }
+  void set_lame_duck_mode_cb(std::function<void(natsConnection*)> cb) { lame_duck_mode_cb = std::move(cb); }
+  void set_reconnect_wait(std::chrono::milliseconds reconnect_wait) { this->reconnect_wait = reconnect_wait; }
+  void set_max_reconnect(int max_reconnect) { this->max_reconnect = max_reconnect; }
+  void set_ping_interval(std::chrono::milliseconds ping_interval) { this->ping_interval = ping_interval; }
+  void set_timeout(std::chrono::milliseconds timeout) { this->timeout = timeout; }
+  void set_name(std::string name) { this->name = std::move(name); }
+  void set_no_echo(bool no_echo) { this->no_echo = no_echo; }
+};
 
 /**
  * @brief Owns a natsConnection and provides modern C++ APIs.
