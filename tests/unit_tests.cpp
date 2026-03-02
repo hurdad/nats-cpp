@@ -198,7 +198,7 @@ void test_kv_bucket_and_key_crud_if_server_available() {
   const std::string bucket = "NATSCPP_KV_" + ts;
   const std::string key = "user-1";
 
-  auto kv = natscpp::key_value::create(nc, bucket);
+  auto kv = natscpp::key_value::create(nc, bucket, 2);
   assert(kv.valid());
   assert(kv.bucket() == bucket);
 
