@@ -12,7 +12,7 @@
  * @brief Umbrella include and usage examples for the header-only natscpp library.
  *
  * @code
- * // Core publish/subscribe
+ * // Core publish/subscribe (synchronous)
  * #include <natscpp/natscpp.hpp>
  *
  * natscpp::connection nc({.url = "nats://localhost:4222"});
@@ -24,10 +24,18 @@
  * @code
  * // RPC request/reply
  * natscpp::connection nc;
- * auto reply = nc.request("svc.echo", "hello", std::chrono::seconds(2));
+ * auto reply = nc.request_sync("svc.echo", "hello", std::chrono::seconds(2));
  *
  * auto fut = nc.request_async("svc.echo", "hello async");
  * auto async_reply = fut.get();
+ * @endcode
+ *
+ * @code
+ * // Asynchronous callback subscribe
+ * natscpp::connection nc;
+ * auto sub = nc.subscribe_async("events.created", [](natscpp::message msg) {
+ *   std::cout << msg.subject() << ": " << msg.data() << "\n";
+ * });
  * @endcode
  *
  * @code
