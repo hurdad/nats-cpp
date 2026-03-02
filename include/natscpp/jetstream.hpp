@@ -126,14 +126,9 @@ class js_pull_consumer {
   [[nodiscard]] bool valid() const noexcept { return sub_ != nullptr; }
 
   [[nodiscard]] message next(std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
-    using next_fn = natsStatus (*)(natsMsg**, natsSubscription*, int64_t);
-    static auto* fn = reinterpret_cast<next_fn>(detail::resolve_symbol("natsSubscription_NextMsg"));
-    if (fn == nullptr) {
-      throw jetstream_not_available();
-    }
-
     natsMsg* msg{};
-    throw_on_error(fn(&msg, sub_, static_cast<int64_t>(timeout.count())), "natsSubscription_NextMsg");
+    throw_on_error(natsSubscription_NextMsg(&msg, sub_, static_cast<int64_t>(timeout.count())),
+                   "natsSubscription_NextMsg");
     return message{msg};
   }
 
@@ -203,7 +198,7 @@ class jetstream {
     return *this;
   }
 
-  void publish(std::string_view subject, std::string_view payload, const js_publish_options& = {}) {
+  void publish(std::string_view subject, std::string_view payload, const js_publish_options& opts = {}) {
     using publish_fn = natsStatus (*)(jsPubAck**, jsCtx*, const char*, const void*, int, jsPubOptions*, jsErrCode*);
     using ack_destroy_fn = void (*)(jsPubAck*);
     static auto* fn = reinterpret_cast<publish_fn>(detail::resolve_symbol("js_Publish"));
@@ -212,9 +207,18 @@ class jetstream {
       throw jetstream_not_available();
     }
 
+    jsPubOptions pub_opts{};
+    bool has_opts = !opts.msg_id.empty() || !opts.expected_stream.empty();
+    if (!opts.msg_id.empty()) {
+      pub_opts.MsgId = opts.msg_id.c_str();
+    }
+    if (!opts.expected_stream.empty()) {
+      pub_opts.ExpectStream = opts.expected_stream.c_str();
+    }
+
     jsPubAck* ack{};
     throw_on_error(fn(&ack, ctx_, std::string(subject).c_str(), payload.data(), static_cast<int>(payload.size()),
-                      nullptr, nullptr),
+                      has_opts ? &pub_opts : nullptr, nullptr),
                    "js_Publish");
     if (ack != nullptr) {
       destroy(ack);
@@ -235,15 +239,22 @@ class jetstream {
     return js_pull_consumer{sub};
   }
 
-  [[nodiscard]] js_push_consumer push_subscribe(std::string_view stream_subject, std::string_view /*durable_name*/) {
+  [[nodiscard]] js_push_consumer push_subscribe(std::string_view stream_subject, std::string_view durable_name) {
     using sub_fn = natsStatus (*)(natsSubscription**, jsCtx*, const char*, jsOptions*, jsSubOptions*, jsErrCode*);
     static auto* fn = reinterpret_cast<sub_fn>(detail::resolve_symbol("js_SubscribeSync"));
     if (fn == nullptr) {
       throw jetstream_not_available();
     }
 
+    std::string durable_str(durable_name);
+    jsSubOptions sub_opts{};
+    if (!durable_str.empty()) {
+      sub_opts.Config.Durable = durable_str.c_str();
+    }
+
     natsSubscription* sub{};
-    throw_on_error(fn(&sub, ctx_, std::string(stream_subject).c_str(), nullptr, nullptr, nullptr),
+    throw_on_error(fn(&sub, ctx_, std::string(stream_subject).c_str(), nullptr,
+                      durable_str.empty() ? nullptr : &sub_opts, nullptr),
                    "js_SubscribeSync");
     return js_push_consumer{sub};
   }

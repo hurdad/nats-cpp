@@ -60,7 +60,9 @@ class subscription {
   ~subscription() { release_callback(); }
 
   subscription(subscription&& other) noexcept
-      : sub_(std::move(other.sub_)), on_release_(std::move(other.on_release_)) {}
+      : sub_(std::move(other.sub_)),
+        on_release_(std::move(other.on_release_)),
+        completion_callbacks_(std::move(other.completion_callbacks_)) {}
 
   subscription& operator=(subscription&& other) noexcept {
     if (this == &other) {
@@ -70,6 +72,7 @@ class subscription {
     release_callback();
     sub_ = std::move(other.sub_);
     on_release_ = std::move(other.on_release_);
+    completion_callbacks_ = std::move(other.completion_callbacks_);
     return *this;
   }
 

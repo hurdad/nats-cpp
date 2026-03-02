@@ -156,15 +156,18 @@ class connection {
     return stats;
   }
 
+  // Buffer sized at 4096 to accommodate long URLs; natsConnection_GetConnectedUrl
+  // uses snprintf and silently truncates without returning an error.
   [[nodiscard]] std::string connected_url() const {
-    std::array<char, 1024> buf{};
-    throw_on_error(natsConnection_GetConnectedUrl(conn_.get(), buf.data(), buf.size()), "natsConnection_GetConnectedUrl");
+    std::array<char, 4096> buf{};
+    throw_on_error(natsConnection_GetConnectedUrl(conn_.get(), buf.data(), static_cast<int>(buf.size())),
+                   "natsConnection_GetConnectedUrl");
     return std::string(buf.data());
   }
 
   [[nodiscard]] std::string connected_server_id() const {
-    std::array<char, 1024> buf{};
-    throw_on_error(natsConnection_GetConnectedServerId(conn_.get(), buf.data(), buf.size()),
+    std::array<char, 4096> buf{};
+    throw_on_error(natsConnection_GetConnectedServerId(conn_.get(), buf.data(), static_cast<int>(buf.size())),
                    "natsConnection_GetConnectedServerId");
     return std::string(buf.data());
   }
@@ -221,46 +224,14 @@ class connection {
   }
 
   [[nodiscard]] subscription subscribe_async_timeout(std::string_view subject, std::chrono::milliseconds timeout,
-                                                   std::function<void(message)> handler) {
-    natsSubscription* raw{};
-    auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
-    auto callbacks_state = callback_state_;
-
-    {
-      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
-      callbacks_state->callbacks[token.get()] = token;
-    }
-
-    natsStatus status = natsConnection_SubscribeTimeout(
-        &raw, conn_.get(), std::string(subject).c_str(), static_cast<int64_t>(timeout.count()),
-        [](natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
-          if (msg == nullptr) {
-            return;
-          }
-          auto* fn = static_cast<std::function<void(message)>*>(closure);
-          natsMsg* dup{};
-          if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
-                             natsMsg_GetDataLength(msg)) == NATS_OK) {
-            try {
-              (*fn)(message{dup});
-            } catch (...) {
-            }
-          }
-        },
-        token.get());
-
-    if (status != NATS_OK) {
-      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
-      callbacks_state->callbacks.erase(token.get());
-      throw_on_error(status, "natsConnection_SubscribeTimeout");
-    }
-
-    return subscription{raw, [callbacks_state = std::weak_ptr<callback_state>(callbacks_state), key = token.get()] {
-      if (const auto locked = callbacks_state.lock()) {
-        std::lock_guard<std::mutex> lock(locked->mutex);
-        locked->callbacks.erase(key);
-      }
-    }};
+                                                     std::function<void(message)> handler) {
+    std::string subj(subject);
+    return register_async_subscription(
+        std::move(handler), "natsConnection_SubscribeTimeout",
+        [this, subj, timeout](natsSubscription** raw, natsMsgHandler cb, void* closure) {
+          return natsConnection_SubscribeTimeout(raw, conn_.get(), subj.c_str(),
+                                                 static_cast<int64_t>(timeout.count()), cb, closure);
+        });
   }
 
   [[nodiscard]] subscription subscribe_queue_sync(std::string_view subject, std::string_view queue) {
@@ -272,134 +243,34 @@ class connection {
   }
 
   [[nodiscard]] subscription subscribe_queue_async_timeout(std::string_view subject, std::string_view queue,
-                                                         std::chrono::milliseconds timeout,
-                                                         std::function<void(message)> handler) {
-    natsSubscription* raw{};
-    auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
-    auto callbacks_state = callback_state_;
-
-    {
-      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
-      callbacks_state->callbacks[token.get()] = token;
-    }
-
-    natsStatus status = natsConnection_QueueSubscribeTimeout(
-        &raw, conn_.get(), std::string(subject).c_str(), std::string(queue).c_str(), static_cast<int64_t>(timeout.count()),
-        [](natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
-          if (msg == nullptr) {
-            return;
-          }
-          auto* fn = static_cast<std::function<void(message)>*>(closure);
-          natsMsg* dup{};
-          if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
-                             natsMsg_GetDataLength(msg)) == NATS_OK) {
-            try {
-              (*fn)(message{dup});
-            } catch (...) {
-            }
-          }
-        },
-        token.get());
-
-    if (status != NATS_OK) {
-      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
-      callbacks_state->callbacks.erase(token.get());
-      throw_on_error(status, "natsConnection_QueueSubscribeTimeout");
-    }
-
-    return subscription{raw, [callbacks_state = std::weak_ptr<callback_state>(callbacks_state), key = token.get()] {
-      if (const auto locked = callbacks_state.lock()) {
-        std::lock_guard<std::mutex> lock(locked->mutex);
-        locked->callbacks.erase(key);
-      }
-    }};
+                                                           std::chrono::milliseconds timeout,
+                                                           std::function<void(message)> handler) {
+    std::string subj(subject), q(queue);
+    return register_async_subscription(
+        std::move(handler), "natsConnection_QueueSubscribeTimeout",
+        [this, subj, q, timeout](natsSubscription** raw, natsMsgHandler cb, void* closure) {
+          return natsConnection_QueueSubscribeTimeout(raw, conn_.get(), subj.c_str(), q.c_str(),
+                                                      static_cast<int64_t>(timeout.count()), cb, closure);
+        });
   }
 
   [[nodiscard]] subscription subscribe_queue_async(std::string_view subject, std::string_view queue,
-                                                  std::function<void(message)> handler) {
-    natsSubscription* raw{};
-    auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
-    auto callbacks_state = callback_state_;
-
-    {
-      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
-      callbacks_state->callbacks[token.get()] = token;
-    }
-
-    natsStatus status = natsConnection_QueueSubscribe(
-        &raw, conn_.get(), std::string(subject).c_str(), std::string(queue).c_str(),
-        [](natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
-          auto* fn = static_cast<std::function<void(message)>*>(closure);
-          natsMsg* dup{};
-          if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
-                             natsMsg_GetDataLength(msg)) == NATS_OK) {
-            try {
-              (*fn)(message{dup});
-            } catch (...) {
-              std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
-            }
-          } else {
-            std::fprintf(stderr, "[natscpp] natsMsg_Create failed: dropping message on subject '%s'\n",
-                         natsMsg_GetSubject(msg));
-          }
-        },
-        token.get());
-
-    if (status != NATS_OK) {
-      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
-      callbacks_state->callbacks.erase(token.get());
-      throw_on_error(status, "natsConnection_QueueSubscribe");
-    }
-
-    return subscription{raw, [callbacks_state = std::weak_ptr<callback_state>(callbacks_state), key = token.get()] {
-      if (const auto locked = callbacks_state.lock()) {
-        std::lock_guard<std::mutex> lock(locked->mutex);
-        locked->callbacks.erase(key);
-      }
-    }};
+                                                   std::function<void(message)> handler) {
+    std::string subj(subject), q(queue);
+    return register_async_subscription(
+        std::move(handler), "natsConnection_QueueSubscribe",
+        [this, subj, q](natsSubscription** raw, natsMsgHandler cb, void* closure) {
+          return natsConnection_QueueSubscribe(raw, conn_.get(), subj.c_str(), q.c_str(), cb, closure);
+        });
   }
 
   [[nodiscard]] subscription subscribe_async(std::string_view subject, std::function<void(message)> handler) {
-    natsSubscription* raw{};
-    auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
-    auto callbacks_state = callback_state_;
-
-    {
-      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
-      callbacks_state->callbacks[token.get()] = token;
-    }
-
-    natsStatus status = natsConnection_Subscribe(
-        &raw, conn_.get(), std::string(subject).c_str(),
-        [](natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
-          auto* fn = static_cast<std::function<void(message)>*>(closure);
-          natsMsg* dup{};
-          if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
-                             natsMsg_GetDataLength(msg)) == NATS_OK) {
-            try {
-              (*fn)(message{dup});
-            } catch (...) {
-              std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
-            }
-          } else {
-            std::fprintf(stderr, "[natscpp] natsMsg_Create failed: dropping message on subject '%s'\n",
-                         natsMsg_GetSubject(msg));
-          }
-        },
-        token.get());
-
-    if (status != NATS_OK) {
-      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
-      callbacks_state->callbacks.erase(token.get());
-      throw_on_error(status, "natsConnection_Subscribe");
-    }
-
-    return subscription{raw, [callbacks_state = std::weak_ptr<callback_state>(callbacks_state), key = token.get()] {
-      if (const auto locked = callbacks_state.lock()) {
-        std::lock_guard<std::mutex> lock(locked->mutex);
-        locked->callbacks.erase(key);
-      }
-    }};
+    std::string subj(subject);
+    return register_async_subscription(
+        std::move(handler), "natsConnection_Subscribe",
+        [this, subj](natsSubscription** raw, natsMsgHandler cb, void* closure) {
+          return natsConnection_Subscribe(raw, conn_.get(), subj.c_str(), cb, closure);
+        });
   }
 
   [[nodiscard]] subscription subscribe(std::string_view subject, std::function<void(message)> handler) {
@@ -475,12 +346,63 @@ class connection {
   [[nodiscard]] std::string new_inbox() const {
     natsInbox* inbox = nullptr;
     throw_on_error(natsInbox_Create(&inbox), "natsInbox_Create");
-    std::string value = reinterpret_cast<const char*>(inbox);
+    // natsInbox is typedef char, so natsInbox* is char* — no cast needed.
+    std::string value{inbox};
     natsInbox_Destroy(inbox);
     return value;
   }
 
  private:
+  // Shared callback dispatched by all async subscriptions. Always null-guards msg
+  // (natsConnection_SubscribeTimeout delivers a null msg to signal timeout expiry).
+  static void async_msg_callback(natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
+    if (msg == nullptr) { return; }
+    auto* fn = static_cast<std::function<void(message)>*>(closure);
+    natsMsg* dup{};
+    if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
+                       natsMsg_GetDataLength(msg)) == NATS_OK) {
+      try {
+        (*fn)(message{dup});
+      } catch (...) {
+        std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
+      }
+    } else {
+      std::fprintf(stderr, "[natscpp] natsMsg_Create failed: dropping message on subject '%s'\n",
+                   natsMsg_GetSubject(msg));
+    }
+  }
+
+  // Common registration logic shared by all four async subscribe variants.
+  // do_subscribe(natsSubscription**, natsMsgHandler, void*) → natsStatus
+  template <typename SubscribeFn>
+  [[nodiscard]] subscription register_async_subscription(std::function<void(message)> handler,
+                                                         const char* context_name,
+                                                         SubscribeFn do_subscribe) {
+    auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
+    auto state = callback_state_;
+
+    {
+      std::lock_guard<std::mutex> lock(state->mutex);
+      state->callbacks[token.get()] = token;
+    }
+
+    natsSubscription* raw{};
+    natsStatus status = do_subscribe(&raw, &async_msg_callback, token.get());
+
+    if (status != NATS_OK) {
+      std::lock_guard<std::mutex> lock(state->mutex);
+      state->callbacks.erase(token.get());
+      throw_on_error(status, context_name);
+    }
+
+    return subscription{raw, [state = std::weak_ptr<callback_state>(state), key = token.get()] {
+      if (const auto locked = state.lock()) {
+        std::lock_guard<std::mutex> lock(locked->mutex);
+        locked->callbacks.erase(key);
+      }
+    }};
+  }
+
   [[nodiscard]] std::vector<std::string> fetch_server_list(
       natsStatus (*getter)(natsConnection*, char***, int*)) const {
     char** values = nullptr;

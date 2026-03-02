@@ -3,6 +3,7 @@
 #include <nats/nats.h>
 
 #include <cstddef>
+#include <cstdlib>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -96,6 +97,8 @@ class message {
     const char** values = nullptr;
     int count = 0;
     throw_on_error(natsMsgHeader_Values(msg_.get(), std::string(key).c_str(), &values, &count), "natsMsgHeader_Values");
+    // nats.c allocates the outer array; free it even if the loop throws.
+    struct array_free { const char** p; ~array_free() { std::free(const_cast<char**>(p)); } } guard{values};
 
     std::vector<std::string> result;
     result.reserve(static_cast<std::size_t>(count));
@@ -110,6 +113,8 @@ class message {
     const char** keys = nullptr;
     int count = 0;
     throw_on_error(natsMsgHeader_Keys(msg_.get(), &keys, &count), "natsMsgHeader_Keys");
+    // nats.c allocates the outer array; free it even if the loop throws.
+    struct array_free { const char** p; ~array_free() { std::free(const_cast<char**>(p)); } } guard{keys};
 
     std::vector<std::string> result;
     result.reserve(static_cast<std::size_t>(count));

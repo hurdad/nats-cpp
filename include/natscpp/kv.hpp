@@ -60,11 +60,13 @@ class kv_entry {
   [[nodiscard]] bool valid() const noexcept { return entry_ != nullptr; }
 
   [[nodiscard]] std::string key() const {
+    if (!entry_) return {};
     const char* value = kvEntry_Key(entry_);
     return value == nullptr ? std::string{} : std::string{value};
   }
 
   [[nodiscard]] std::string value() const {
+    if (!entry_) return {};
     const char* value = static_cast<const char*>(kvEntry_Value(entry_));
     int len = kvEntry_ValueLen(entry_);
     // Only treat a null pointer as "no value"; len == 0 is a valid empty string.
@@ -75,23 +77,28 @@ class kv_entry {
   }
 
   [[nodiscard]] uint64_t revision() const {
+    if (!entry_) return 0;
     return kvEntry_Revision(entry_);
   }
 
   [[nodiscard]] std::string bucket() const {
+    if (!entry_) return {};
     const char* value = kvEntry_Bucket(entry_);
     return value == nullptr ? std::string{} : std::string{value};
   }
 
   [[nodiscard]] int64_t created() const {
+    if (!entry_) return 0;
     return kvEntry_Created(entry_);
   }
 
   [[nodiscard]] uint64_t delta() const {
+    if (!entry_) return 0;
     return kvEntry_Delta(entry_);
   }
 
   [[nodiscard]] kvOperation operation() const {
+    if (!entry_) return kvOp_Put;
     return kvEntry_Operation(entry_);
   }
 
