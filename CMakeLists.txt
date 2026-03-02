@@ -15,13 +15,32 @@ target_include_directories(natscpp
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-  pkg_check_modules(NATS QUIET IMPORTED_TARGET libnats)
-endif()
+set(NATS_C_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nats.c")
 
-if(TARGET PkgConfig::NATS)
-  target_link_libraries(natscpp INTERFACE PkgConfig::NATS)
+if(EXISTS "${NATS_C_SOURCE_DIR}/CMakeLists.txt")
+  set(NATS_BUILD_LIB_SHARED OFF CACHE BOOL "" FORCE)
+  set(NATS_BUILD_LIB_STATIC ON CACHE BOOL "" FORCE)
+  set(NATS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(NATS_BUILD_STREAMING OFF CACHE BOOL "" FORCE)
+  set(NATS_BUILD_WITH_TLS OFF CACHE BOOL "" FORCE)
+  set(NATS_BUILD_WITH_DEPRECATED OFF CACHE BOOL "" FORCE)
+  set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+
+  add_subdirectory("${NATS_C_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/third_party/nats.c")
+  target_link_libraries(natscpp INTERFACE nats_static)
+else()
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(NATS QUIET IMPORTED_TARGET libnats)
+  endif()
+
+  if(TARGET PkgConfig::NATS)
+    target_link_libraries(natscpp INTERFACE PkgConfig::NATS)
+  else()
+    message(FATAL_ERROR
+      "Unable to find libnats dependency. Initialize third_party/nats.c submodule "
+      "or install system libnats (pkg-config package: libnats).")
+  endif()
 endif()
 
 include(CMakePackageConfigHelpers)
