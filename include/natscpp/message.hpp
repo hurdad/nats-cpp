@@ -3,6 +3,7 @@
 #include <nats/nats.h>
 
 #include <cstddef>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -18,6 +19,17 @@ namespace natscpp {
  */
 class message {
  public:
+  struct metadata {
+    uint64_t sequence_stream = 0;
+    uint64_t sequence_consumer = 0;
+    uint64_t num_delivered = 0;
+    uint64_t num_pending = 0;
+    int64_t timestamp = 0;
+    std::string stream;
+    std::string consumer;
+    std::string domain;
+  };
+
   message() = default;
   explicit message(natsMsg* raw) : msg_(raw) {}
 
@@ -110,9 +122,31 @@ class message {
   [[nodiscard]] bool is_no_responders() const noexcept { return msg_ != nullptr && natsMsg_IsNoResponders(msg_.get()); }
 
   void ack() { throw_on_error(natsMsg_Ack(msg_.get(), nullptr), "natsMsg_Ack"); }
+  void ack_sync() { throw_on_error(natsMsg_AckSync(msg_.get(), nullptr, nullptr), "natsMsg_AckSync"); }
   void nak() { throw_on_error(natsMsg_Nak(msg_.get(), nullptr), "natsMsg_Nak"); }
+  void nak_with_delay(std::chrono::milliseconds delay) {
+    throw_on_error(natsMsg_NakWithDelay(msg_.get(), static_cast<int64_t>(delay.count()), nullptr),
+                   "natsMsg_NakWithDelay");
+  }
   void in_progress() { throw_on_error(natsMsg_InProgress(msg_.get(), nullptr), "natsMsg_InProgress"); }
   void term() { throw_on_error(natsMsg_Term(msg_.get(), nullptr), "natsMsg_Term"); }
+
+  [[nodiscard]] metadata get_metadata() const {
+    jsMsgMetaData* raw = nullptr;
+    throw_on_error(natsMsg_GetMetaData(&raw, msg_.get()), "natsMsg_GetMetaData");
+    std::unique_ptr<jsMsgMetaData, void (*)(jsMsgMetaData*)> holder(raw, jsMsgMetaData_Destroy);
+
+    metadata out;
+    out.sequence_stream = raw->Sequence.Stream;
+    out.sequence_consumer = raw->Sequence.Consumer;
+    out.num_delivered = raw->NumDelivered;
+    out.num_pending = raw->NumPending;
+    out.timestamp = raw->Timestamp;
+    out.stream = raw->Stream != nullptr ? raw->Stream : "";
+    out.consumer = raw->Consumer != nullptr ? raw->Consumer : "";
+    out.domain = raw->Domain != nullptr ? raw->Domain : "";
+    return out;
+  }
 
   [[nodiscard]] uint64_t sequence() const noexcept { return msg_ != nullptr ? natsMsg_GetSequence(msg_.get()) : 0; }
   [[nodiscard]] int64_t timestamp() const noexcept { return msg_ != nullptr ? natsMsg_GetTime(msg_.get()) : 0; }

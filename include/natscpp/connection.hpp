@@ -31,6 +31,7 @@ namespace natscpp {
  */
 struct connection_options {
   std::string url{"nats://127.0.0.1:4222"};
+  bool retry_on_failed_connect = false;
 };
 
 /**
@@ -54,7 +55,15 @@ class connection {
 
   void connect(const connection_options& options = {}) {
     natsConnection* raw{};
-    throw_on_error(natsConnection_ConnectTo(&raw, options.url.c_str()), "natsConnection_ConnectTo");
+    natsOptions* nopts = nullptr;
+    throw_on_error(natsOptions_Create(&nopts), "natsOptions_Create");
+    std::unique_ptr<natsOptions, void (*)(natsOptions*)> holder(nopts, natsOptions_Destroy);
+    throw_on_error(natsOptions_SetURL(nopts, options.url.c_str()), "natsOptions_SetURL");
+    if (options.retry_on_failed_connect) {
+      throw_on_error(natsOptions_SetRetryOnFailedConnect(nopts, true, nullptr, nullptr),
+                     "natsOptions_SetRetryOnFailedConnect");
+    }
+    throw_on_error(natsConnection_Connect(&raw, nopts), "natsConnection_Connect");
     conn_.reset(raw, detail::connection_deleter{});
   }
 
@@ -114,6 +123,17 @@ class connection {
 
   void flush() { throw_on_error(natsConnection_Flush(conn_.get()), "natsConnection_Flush"); }
   void close() { natsConnection_Close(conn_.get()); }
+  [[nodiscard]] std::array<unsigned char, 64> sign(std::string_view message) {
+    std::array<unsigned char, 64> sig{};
+    throw_on_error(natsConnection_Sign(conn_.get(), reinterpret_cast<const unsigned char*>(message.data()),
+                                       static_cast<int>(message.size()), sig.data()),
+                   "natsConnection_Sign");
+    return sig;
+  }
+
+  void process_read_event() { natsConnection_ProcessReadEvent(conn_.get()); }
+  void process_write_event() { natsConnection_ProcessWriteEvent(conn_.get()); }
+
   void drain() { throw_on_error(natsConnection_Drain(conn_.get()), "natsConnection_Drain"); }
   void drain(std::chrono::milliseconds timeout) {
     throw_on_error(natsConnection_DrainTimeout(conn_.get(), static_cast<int64_t>(timeout.count())),
@@ -200,12 +220,99 @@ class connection {
     return subscription{raw};
   }
 
+  [[nodiscard]] subscription subscribe_async_timeout(std::string_view subject, std::chrono::milliseconds timeout,
+                                                   std::function<void(message)> handler) {
+    natsSubscription* raw{};
+    auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
+    auto callbacks_state = callback_state_;
+
+    {
+      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
+      callbacks_state->callbacks[token.get()] = token;
+    }
+
+    natsStatus status = natsConnection_SubscribeTimeout(
+        &raw, conn_.get(), std::string(subject).c_str(), static_cast<int64_t>(timeout.count()),
+        [](natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
+          if (msg == nullptr) {
+            return;
+          }
+          auto* fn = static_cast<std::function<void(message)>*>(closure);
+          natsMsg* dup{};
+          if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
+                             natsMsg_GetDataLength(msg)) == NATS_OK) {
+            try {
+              (*fn)(message{dup});
+            } catch (...) {
+            }
+          }
+        },
+        token.get());
+
+    if (status != NATS_OK) {
+      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
+      callbacks_state->callbacks.erase(token.get());
+      throw_on_error(status, "natsConnection_SubscribeTimeout");
+    }
+
+    return subscription{raw, [callbacks_state = std::weak_ptr<callback_state>(callbacks_state), key = token.get()] {
+      if (const auto locked = callbacks_state.lock()) {
+        std::lock_guard<std::mutex> lock(locked->mutex);
+        locked->callbacks.erase(key);
+      }
+    }};
+  }
+
   [[nodiscard]] subscription subscribe_queue_sync(std::string_view subject, std::string_view queue) {
     natsSubscription* raw{};
     throw_on_error(
         natsConnection_QueueSubscribeSync(&raw, conn_.get(), std::string(subject).c_str(), std::string(queue).c_str()),
         "natsConnection_QueueSubscribeSync");
     return subscription{raw};
+  }
+
+  [[nodiscard]] subscription subscribe_queue_async_timeout(std::string_view subject, std::string_view queue,
+                                                         std::chrono::milliseconds timeout,
+                                                         std::function<void(message)> handler) {
+    natsSubscription* raw{};
+    auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
+    auto callbacks_state = callback_state_;
+
+    {
+      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
+      callbacks_state->callbacks[token.get()] = token;
+    }
+
+    natsStatus status = natsConnection_QueueSubscribeTimeout(
+        &raw, conn_.get(), std::string(subject).c_str(), std::string(queue).c_str(), static_cast<int64_t>(timeout.count()),
+        [](natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
+          if (msg == nullptr) {
+            return;
+          }
+          auto* fn = static_cast<std::function<void(message)>*>(closure);
+          natsMsg* dup{};
+          if (natsMsg_Create(&dup, natsMsg_GetSubject(msg), natsMsg_GetReply(msg), natsMsg_GetData(msg),
+                             natsMsg_GetDataLength(msg)) == NATS_OK) {
+            try {
+              (*fn)(message{dup});
+            } catch (...) {
+            }
+          }
+        },
+        token.get());
+
+    if (status != NATS_OK) {
+      std::lock_guard<std::mutex> lock(callbacks_state->mutex);
+      callbacks_state->callbacks.erase(token.get());
+      throw_on_error(status, "natsConnection_QueueSubscribeTimeout");
+    }
+
+    return subscription{raw, [callbacks_state = std::weak_ptr<callback_state>(callbacks_state), key = token.get()] {
+      if (const auto locked = callbacks_state.lock()) {
+        std::lock_guard<std::mutex> lock(locked->mutex);
+        locked->callbacks.erase(key);
+      }
+    }};
   }
 
   [[nodiscard]] subscription subscribe_queue_async(std::string_view subject, std::string_view queue,
