@@ -1,5 +1,6 @@
 #include <natscpp/awaitable.hpp>
 #include <natscpp/error.hpp>
+#include <natscpp/jetstream.hpp>
 #include <natscpp/message.hpp>
 
 #include <cassert>
@@ -58,6 +59,26 @@ void test_future_awaitable_ready_and_resume() {
   }
 }
 
+void test_jetstream_and_consumers_move_semantics_on_empty_handles() {
+  natscpp::jetstream js_default;
+  natscpp::jetstream js_moved = std::move(js_default);
+  natscpp::jetstream js_assigned;
+  js_assigned = std::move(js_moved);
+
+  natscpp::js_pull_consumer pull_default;
+  natscpp::js_pull_consumer pull_moved = std::move(pull_default);
+  natscpp::js_pull_consumer pull_assigned;
+  pull_assigned = std::move(pull_moved);
+
+  natscpp::js_push_consumer push_default;
+  natscpp::js_push_consumer push_moved = std::move(push_default);
+  natscpp::js_push_consumer push_assigned;
+  push_assigned = std::move(push_moved);
+
+  assert(!pull_assigned.valid());
+  assert(!push_assigned.valid());
+}
+
 }  // namespace
 
 int main() {
@@ -65,5 +86,6 @@ int main() {
   test_throw_on_error_reports_status_and_context();
   test_message_accessors_and_headers();
   test_future_awaitable_ready_and_resume();
+  test_jetstream_and_consumers_move_semantics_on_empty_handles();
   return 0;
 }

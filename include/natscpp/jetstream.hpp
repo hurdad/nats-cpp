@@ -34,6 +34,20 @@ inline void* resolve_symbol(const char* name) {
   return dlsym(RTLD_DEFAULT, name);
 #endif
 }
+
+inline void destroy_js_subscription(void* sub) {
+  using destroy_fn = void (*)(void*);
+  if (auto* fn = reinterpret_cast<destroy_fn>(resolve_symbol("natsSubscription_Destroy")); fn != nullptr && sub != nullptr) {
+    fn(sub);
+  }
+}
+
+inline void destroy_js_context(void* ctx) {
+  using destroy_fn = void (*)(void*);
+  if (auto* fn = reinterpret_cast<destroy_fn>(resolve_symbol("jsCtx_Destroy")); fn != nullptr && ctx != nullptr) {
+    fn(ctx);
+  }
+}
 }  // namespace detail
 
 /**
@@ -51,6 +65,20 @@ class js_pull_consumer {
  public:
   js_pull_consumer() = default;
   explicit js_pull_consumer(void* sub) : sub_(sub) {}
+  ~js_pull_consumer() { detail::destroy_js_subscription(sub_); }
+
+  js_pull_consumer(const js_pull_consumer&) = delete;
+  js_pull_consumer& operator=(const js_pull_consumer&) = delete;
+
+  js_pull_consumer(js_pull_consumer&& other) noexcept : sub_(other.sub_) { other.sub_ = nullptr; }
+  js_pull_consumer& operator=(js_pull_consumer&& other) noexcept {
+    if (this != &other) {
+      detail::destroy_js_subscription(sub_);
+      sub_ = other.sub_;
+      other.sub_ = nullptr;
+    }
+    return *this;
+  }
 
   [[nodiscard]] bool valid() const noexcept { return sub_ != nullptr; }
 
@@ -77,6 +105,20 @@ class js_push_consumer {
  public:
   js_push_consumer() = default;
   explicit js_push_consumer(void* sub) : sub_(sub) {}
+  ~js_push_consumer() { detail::destroy_js_subscription(sub_); }
+
+  js_push_consumer(const js_push_consumer&) = delete;
+  js_push_consumer& operator=(const js_push_consumer&) = delete;
+
+  js_push_consumer(js_push_consumer&& other) noexcept : sub_(other.sub_) { other.sub_ = nullptr; }
+  js_push_consumer& operator=(js_push_consumer&& other) noexcept {
+    if (this != &other) {
+      detail::destroy_js_subscription(sub_);
+      sub_ = other.sub_;
+      other.sub_ = nullptr;
+    }
+    return *this;
+  }
 
   [[nodiscard]] bool valid() const noexcept { return sub_ != nullptr; }
 
@@ -104,11 +146,7 @@ class jetstream {
   }
 
   ~jetstream() {
-    using destroy_fn = void (*)(void*);
-    auto* fn = reinterpret_cast<destroy_fn>(detail::resolve_symbol("jsCtx_Destroy"));
-    if (fn != nullptr && ctx_ != nullptr) {
-      fn(ctx_);
-    }
+    detail::destroy_js_context(ctx_);
   }
 
   jetstream(const jetstream&) = delete;
@@ -117,7 +155,7 @@ class jetstream {
   jetstream(jetstream&& other) noexcept : ctx_(other.ctx_) { other.ctx_ = nullptr; }
   jetstream& operator=(jetstream&& other) noexcept {
     if (this != &other) {
-      this->~jetstream();
+      detail::destroy_js_context(ctx_);
       ctx_ = other.ctx_;
       other.ctx_ = nullptr;
     }
