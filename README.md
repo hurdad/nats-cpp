@@ -15,7 +15,7 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
 - Optional coroutine support (`co_await`) through future awaitables.
 - JetStream wrappers (context, stream/consumer management, push/pull subscriptions).
 - Stream + consumer-group creation helpers (`create_stream`, `create_consumer_group`).
-- KeyValue wrappers (open bucket, put/get/delete entries).
+- KeyValue wrappers (open bucket, put/get/delete entries, watch key updates).
 - Trace propagation helpers using NATS headers (`TraceCarrier` concept).
 - Graceful JetStream fallback when linked `nats.c` does not expose JetStream symbols.
 
@@ -148,8 +148,24 @@ natscpp::key_value kv(nc, "profiles");
 
 kv.put("user-1", R"({"name":"Ada"})");
 auto entry = kv.get("user-1");
+
+natscpp::kv_watch_options watch_opts;
+watch_opts.updates_only = true;
+auto watcher = kv.watch("user-1", &watch_opts);
+
+kv.put("user-1", R"({"name":"Ada","active":true})");
+auto updated = watcher.next(std::chrono::seconds(1).count() * 1000);
+watcher.stop();
+
 kv.erase("user-1");
 ```
+
+Watch APIs:
+- `watch(key, opts)` for a single key/filter
+- `watch_multi(keys, opts)` for multiple keys/filters
+- `watch_all(opts)` for all keys in the bucket
+
+`kv_watcher::next()` may return an invalid `kv_entry` (`entry.valid() == false`) when the initial snapshot is complete.
 
 ## KeyValue example
 

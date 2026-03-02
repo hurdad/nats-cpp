@@ -36,6 +36,12 @@ inline void destroy_kv_context(jsCtx* ctx) {
     jsCtx_Destroy(ctx);
   }
 }
+
+inline void destroy_kv_watcher(kvWatcher* watcher) {
+  if (watcher != nullptr) {
+    kvWatcher_Destroy(watcher);
+  }
+}
 }  // namespace detail
 
 class kv_entry {
@@ -104,6 +110,49 @@ class kv_entry {
 
  private:
   kvEntry* entry_{};
+};
+
+struct kv_watch_options {
+  bool ignore_deletes = false;
+  bool include_history = false;
+  bool meta_only = false;
+  int64_t timeout = 0;
+  bool updates_only = false;
+};
+
+class kv_watcher {
+ public:
+  kv_watcher() = default;
+  explicit kv_watcher(kvWatcher* watcher) : watcher_(watcher) {}
+  ~kv_watcher() { detail::destroy_kv_watcher(watcher_); }
+
+  kv_watcher(const kv_watcher&) = delete;
+  kv_watcher& operator=(const kv_watcher&) = delete;
+
+  kv_watcher(kv_watcher&& other) noexcept : watcher_(other.watcher_) { other.watcher_ = nullptr; }
+  kv_watcher& operator=(kv_watcher&& other) noexcept {
+    if (this != &other) {
+      detail::destroy_kv_watcher(watcher_);
+      watcher_ = other.watcher_;
+      other.watcher_ = nullptr;
+    }
+    return *this;
+  }
+
+  [[nodiscard]] bool valid() const noexcept { return watcher_ != nullptr; }
+
+  [[nodiscard]] kv_entry next(int64_t timeout_ms = -1) const {
+    kvEntry* entry = nullptr;
+    throw_on_error(kvWatcher_Next(&entry, watcher_, timeout_ms), "kvWatcher_Next");
+    return kv_entry{entry};
+  }
+
+  void stop() const {
+    throw_on_error(kvWatcher_Stop(watcher_), "kvWatcher_Stop");
+  }
+
+ private:
+  kvWatcher* watcher_{};
 };
 
 class key_value {
@@ -184,6 +233,35 @@ class key_value {
 
   [[nodiscard]] bool valid() const noexcept { return kv_ != nullptr; }
 
+  [[nodiscard]] kv_watcher watch(std::string_view key, const kv_watch_options* options = nullptr) const {
+    kvWatcher* watcher{};
+    auto native = to_native_watch_options(options);
+    throw_on_error(kvStore_Watch(&watcher, kv_, std::string(key).c_str(), native), "kvStore_Watch");
+    return kv_watcher{watcher};
+  }
+
+  [[nodiscard]] kv_watcher watch_multi(const std::vector<std::string>& keys,
+                                       const kv_watch_options* options = nullptr) const {
+    kvWatcher* watcher{};
+    std::vector<const char*> key_ptrs;
+    key_ptrs.reserve(keys.size());
+    for (const auto& key : keys) {
+      key_ptrs.push_back(key.c_str());
+    }
+
+    auto native = to_native_watch_options(options);
+    throw_on_error(kvStore_WatchMulti(&watcher, kv_, key_ptrs.data(), static_cast<int>(key_ptrs.size()), native),
+                   "kvStore_WatchMulti");
+    return kv_watcher{watcher};
+  }
+
+  [[nodiscard]] kv_watcher watch_all(const kv_watch_options* options = nullptr) const {
+    kvWatcher* watcher{};
+    auto native = to_native_watch_options(options);
+    throw_on_error(kvStore_WatchAll(&watcher, kv_, native), "kvStore_WatchAll");
+    return kv_watcher{watcher};
+  }
+
   [[nodiscard]] kv_entry get(std::string_view key) const {
     kvEntry* entry{};
     throw_on_error(kvStore_Get(&entry, kv_, std::string(key).c_str()), "kvStore_Get");
@@ -259,6 +337,21 @@ class key_value {
   }
 
  private:
+  [[nodiscard]] static const kvWatchOptions* to_native_watch_options(const kv_watch_options* options) {
+    if (options == nullptr) {
+      return nullptr;
+    }
+
+    thread_local kvWatchOptions native{};
+    throw_on_error(kvWatchOptions_Init(&native), "kvWatchOptions_Init");
+    native.IgnoreDeletes = options->ignore_deletes;
+    native.IncludeHistory = options->include_history;
+    native.MetaOnly = options->meta_only;
+    native.Timeout = options->timeout;
+    native.UpdatesOnly = options->updates_only;
+    return &native;
+  }
+
   void destroy_self() noexcept {
     detail::destroy_kv_store(kv_);
     kv_ = nullptr;

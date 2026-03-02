@@ -95,6 +95,11 @@ void test_jetstream_and_consumers_move_semantics_on_empty_handles() {
   natscpp::kv_entry kv_entry_assigned;
   kv_entry_assigned = std::move(kv_entry_moved);
 
+  natscpp::kv_watcher kv_watcher_default;
+  natscpp::kv_watcher kv_watcher_moved = std::move(kv_watcher_default);
+  natscpp::kv_watcher kv_watcher_assigned;
+  kv_watcher_assigned = std::move(kv_watcher_moved);
+
   natscpp::key_value kv_default;
   natscpp::key_value kv_moved = std::move(kv_default);
   natscpp::key_value kv_assigned;
@@ -103,6 +108,7 @@ void test_jetstream_and_consumers_move_semantics_on_empty_handles() {
   assert(!pull_assigned.valid());
   assert(!push_assigned.valid());
   assert(!kv_entry_assigned.valid());
+  assert(!kv_watcher_assigned.valid());
   assert(!kv_assigned.valid());
 }
 
@@ -177,6 +183,15 @@ void test_connection_has_sync_and_async_apis() {
   static_assert(requires { natscpp::key_value(nc, "bucket"); });
   static_assert(requires { natscpp::key_value::create(nc, "bucket"); });
   static_assert(requires { natscpp::key_value::delete_bucket(nc, "bucket"); });
+  static_assert(requires(natscpp::key_value kv) {
+    kv.watch("key");
+    kv.watch_multi(std::vector<std::string>{"a", "b"});
+    kv.watch_all();
+  });
+  static_assert(requires(natscpp::kv_watcher watcher) {
+    watcher.next();
+    watcher.stop();
+  });
   static_assert(requires {
     js.create_stream(natscpp::js_stream_config{.name = "ORDERS", .subjects = {"orders.>"}});
   });
@@ -542,6 +557,54 @@ void test_kv_put_erase_and_entry_fields_if_server_available() {
   natscpp::key_value::delete_bucket(nc, bucket);
 }
 
+void test_kv_watchers_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping kv watcher checks (NATS server unavailable)\n";
+    return;
+  }
+
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string bucket = "NATSCPP_KVW_" + ts;
+
+  auto kv = natscpp::key_value::create(nc, bucket, 2);
+
+  natscpp::kv_watch_options opts;
+  opts.updates_only = true;
+
+  auto key_watch = kv.watch("user.1", &opts);
+  const auto watch_r1 = kv.put("user.1", "first");
+  assert(watch_r1 >= 1);
+  auto key_entry = key_watch.next(2000);
+  assert(key_entry.valid());
+  assert(key_entry.key() == "user.1");
+  assert(key_entry.value() == "first");
+
+  auto all_watch = kv.watch_all(&opts);
+  const auto watch_r2 = kv.put("user.2", "second");
+  assert(watch_r2 > watch_r1);
+  auto all_entry = all_watch.next(2000);
+  assert(all_entry.valid());
+  assert(all_entry.key() == "user.2");
+  assert(all_entry.value() == "second");
+
+  auto multi_watch = kv.watch_multi({"user.3", "user.4"}, &opts);
+  const auto watch_r3 = kv.put("user.4", "fourth");
+  assert(watch_r3 > watch_r2);
+  auto multi_entry = multi_watch.next(2000);
+  assert(multi_entry.valid());
+  assert(multi_entry.key() == "user.4");
+  assert(multi_entry.value() == "fourth");
+
+  key_watch.stop();
+  all_watch.stop();
+  multi_watch.stop();
+
+  natscpp::key_value::delete_bucket(nc, bucket);
+}
+
 void test_connection_sync_and_async_roundtrip_if_server_available() {
   natscpp::connection nc;
   try {
@@ -632,5 +695,6 @@ int main() {
   test_subscription_drain_if_server_available();
   test_kv_bucket_and_key_crud_if_server_available();
   test_kv_put_erase_and_entry_fields_if_server_available();
+  test_kv_watchers_if_server_available();
   return 0;
 }
