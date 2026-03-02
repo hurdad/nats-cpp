@@ -4,15 +4,19 @@
 
 #include <cassert>
 #include <chrono>
+#include <array>
 #include <cstdio>
 #include <functional>
 #include <future>
 #include <limits>
 #include <memory>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <natscpp/awaitable.hpp>
 #include <natscpp/detail/deleters.hpp>
@@ -34,6 +38,14 @@ struct connection_options {
  */
 class connection {
  public:
+  struct statistics {
+    uint64_t in_messages = 0;
+    uint64_t in_bytes = 0;
+    uint64_t out_messages = 0;
+    uint64_t out_bytes = 0;
+    uint64_t reconnects = 0;
+  };
+
   connection() = default;
 
   explicit connection(const connection_options& options) {
@@ -48,6 +60,18 @@ class connection {
 
   [[nodiscard]] bool connected() const noexcept { return conn_ != nullptr; }
   [[nodiscard]] natsConnection* native_handle() const noexcept { return conn_.get(); }
+  [[nodiscard]] bool is_closed() const noexcept { return conn_ == nullptr || natsConnection_IsClosed(conn_.get()); }
+  [[nodiscard]] bool is_reconnecting() const noexcept {
+    return conn_ != nullptr && natsConnection_IsReconnecting(conn_.get());
+  }
+  [[nodiscard]] bool is_draining() const noexcept { return conn_ != nullptr && natsConnection_IsDraining(conn_.get()); }
+  [[nodiscard]] natsConnStatus status() const noexcept {
+    return conn_ != nullptr ? natsConnection_Status(conn_.get()) : NATS_CONN_STATUS_CLOSED;
+  }
+
+  [[nodiscard]] uint64_t buffered_bytes() const noexcept {
+    return conn_ != nullptr ? natsConnection_Buffered(conn_.get()) : 0;
+  }
 
   void publish(std::string_view subject, std::string_view payload) {
     assert(payload.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
@@ -57,9 +81,116 @@ class connection {
                    "natsConnection_Publish");
   }
 
-  void flush(std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+  void publish_string(std::string_view subject, std::string_view payload) {
+    throw_on_error(natsConnection_PublishString(conn_.get(), std::string(subject).c_str(), std::string(payload).c_str()),
+                   "natsConnection_PublishString");
+  }
+
+  void publish_request(std::string_view subject, std::string_view reply_to, std::string_view payload) {
+    throw_on_error(natsConnection_PublishRequest(conn_.get(), std::string(subject).c_str(), std::string(reply_to).c_str(),
+                                                 payload.data(), static_cast<int>(payload.size())),
+                   "natsConnection_PublishRequest");
+  }
+
+  void publish_request_string(std::string_view subject, std::string_view reply_to, std::string_view payload) {
+    throw_on_error(natsConnection_PublishRequestString(conn_.get(), std::string(subject).c_str(),
+                                                       std::string(reply_to).c_str(), std::string(payload).c_str()),
+                   "natsConnection_PublishRequestString");
+  }
+
+  void publish(message msg) {
+    natsMsg* raw = msg.release();
+    natsStatus status = natsConnection_PublishMsg(conn_.get(), raw);
+    if (status != NATS_OK) {
+      natsMsg_Destroy(raw);
+    }
+    throw_on_error(status, "natsConnection_PublishMsg");
+  }
+
+  void flush(std::chrono::milliseconds timeout) {
     throw_on_error(natsConnection_FlushTimeout(conn_.get(), static_cast<int64_t>(timeout.count())),
                    "natsConnection_FlushTimeout");
+  }
+
+  void flush() { throw_on_error(natsConnection_Flush(conn_.get()), "natsConnection_Flush"); }
+  void close() { natsConnection_Close(conn_.get()); }
+  void drain() { throw_on_error(natsConnection_Drain(conn_.get()), "natsConnection_Drain"); }
+  void drain(std::chrono::milliseconds timeout) {
+    throw_on_error(natsConnection_DrainTimeout(conn_.get(), static_cast<int64_t>(timeout.count())),
+                   "natsConnection_DrainTimeout");
+  }
+
+  [[nodiscard]] int64_t max_payload() const noexcept {
+    return conn_ != nullptr ? natsConnection_GetMaxPayload(conn_.get()) : 0;
+  }
+
+  [[nodiscard]] statistics get_statistics() const {
+    natsStatistics* raw{};
+    throw_on_error(natsStatistics_Create(&raw), "natsStatistics_Create");
+    std::unique_ptr<natsStatistics, void (*)(natsStatistics*)> holder(raw, natsStatistics_Destroy);
+    throw_on_error(natsConnection_GetStats(conn_.get(), holder.get()), "natsConnection_GetStats");
+    statistics stats;
+    throw_on_error(natsStatistics_GetCounts(holder.get(), &stats.in_messages, &stats.in_bytes, &stats.out_messages,
+                                            &stats.out_bytes, &stats.reconnects),
+                   "natsStatistics_GetCounts");
+    return stats;
+  }
+
+  [[nodiscard]] std::string connected_url() const {
+    std::array<char, 1024> buf{};
+    throw_on_error(natsConnection_GetConnectedUrl(conn_.get(), buf.data(), buf.size()), "natsConnection_GetConnectedUrl");
+    return std::string(buf.data());
+  }
+
+  [[nodiscard]] std::string connected_server_id() const {
+    std::array<char, 1024> buf{};
+    throw_on_error(natsConnection_GetConnectedServerId(conn_.get(), buf.data(), buf.size()),
+                   "natsConnection_GetConnectedServerId");
+    return std::string(buf.data());
+  }
+
+  [[nodiscard]] std::vector<std::string> servers() const { return fetch_server_list(&natsConnection_GetServers); }
+  [[nodiscard]] std::vector<std::string> discovered_servers() const {
+    return fetch_server_list(&natsConnection_GetDiscoveredServers);
+  }
+
+  [[nodiscard]] std::string last_error() const {
+    const char* value = nullptr;
+    throw_on_error(natsConnection_GetLastError(conn_.get(), &value), "natsConnection_GetLastError");
+    return value != nullptr ? std::string(value) : std::string{};
+  }
+
+  [[nodiscard]] uint64_t client_id() const {
+    uint64_t value = 0;
+    throw_on_error(natsConnection_GetClientID(conn_.get(), &value), "natsConnection_GetClientID");
+    return value;
+  }
+
+  [[nodiscard]] std::string client_ip() const {
+    char* value = nullptr;
+    throw_on_error(natsConnection_GetClientIP(conn_.get(), &value), "natsConnection_GetClientIP");
+    std::string out = value != nullptr ? value : "";
+    std::free(value);
+    return out;
+  }
+
+  [[nodiscard]] std::chrono::microseconds rtt() const {
+    int64_t value = 0;
+    throw_on_error(natsConnection_GetRTT(conn_.get(), &value), "natsConnection_GetRTT");
+    return std::chrono::microseconds(value);
+  }
+
+  [[nodiscard]] bool has_header_support() const noexcept {
+    return conn_ != nullptr && natsConnection_HasHeaderSupport(conn_.get());
+  }
+
+  [[nodiscard]] std::pair<std::string, int> local_ip_and_port() const {
+    char* ip = nullptr;
+    int port = 0;
+    throw_on_error(natsConnection_GetLocalIPAndPort(conn_.get(), &ip, &port), "natsConnection_GetLocalIPAndPort");
+    std::pair<std::string, int> out{ip != nullptr ? ip : "", port};
+    std::free(ip);
+    return out;
   }
 
   [[nodiscard]] subscription subscribe_sync(std::string_view subject) {
@@ -184,6 +315,26 @@ class connection {
     return message{reply};
   }
 
+  [[nodiscard]] message request_string(std::string_view subject, std::string_view payload,
+                                       std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+    natsMsg* reply{};
+    throw_on_error(natsConnection_RequestString(&reply, conn_.get(), std::string(subject).c_str(),
+                                                std::string(payload).c_str(), static_cast<int64_t>(timeout.count())),
+                   "natsConnection_RequestString");
+    return message{reply};
+  }
+
+  [[nodiscard]] message request(message request_message, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+    natsMsg* reply{};
+    natsMsg* raw = request_message.release();
+    natsStatus status = natsConnection_RequestMsg(&reply, conn_.get(), raw, static_cast<int64_t>(timeout.count()));
+    if (status != NATS_OK) {
+      natsMsg_Destroy(raw);
+    }
+    throw_on_error(status, "natsConnection_RequestMsg");
+    return message{reply};
+  }
+
   [[nodiscard]] message request(std::string_view subject, std::string_view payload,
                                 std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
     return request_sync(subject, payload, timeout);
@@ -223,6 +374,22 @@ class connection {
   }
 
  private:
+  [[nodiscard]] std::vector<std::string> fetch_server_list(
+      natsStatus (*getter)(natsConnection*, char***, int*)) const {
+    char** values = nullptr;
+    int count = 0;
+    throw_on_error(getter(conn_.get(), &values, &count), "natsConnection_GetServers*");
+
+    std::vector<std::string> out;
+    out.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i) {
+      out.emplace_back(values[i] != nullptr ? values[i] : "");
+      std::free(values[i]);
+    }
+    std::free(values);
+    return out;
+  }
+
   struct callback_state {
     std::unordered_map<void*, std::shared_ptr<std::function<void(message)>>> callbacks;
     std::mutex mutex;
