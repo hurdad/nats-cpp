@@ -767,6 +767,133 @@ void test_kv_watchers_if_server_available() {
   natscpp::key_value::delete_bucket(nc, bucket);
 }
 
+void test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping jetstream publish/subscription checks (NATS server unavailable)\n";
+    return;
+  }
+
+  natscpp::jetstream js(nc);
+  auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string stream = "NATSCPP_JS_" + ts;
+  const std::string subject = "natscpp.js." + ts;
+  const std::string pull_durable = "pull" + ts;
+  const std::string push_durable = "push" + ts;
+  const std::string alias_durable = "alias" + ts;
+
+  auto created_stream = js.create_stream(natscpp::js_stream_config{.name = stream, .subjects = {subject}});
+  assert(created_stream.name == stream);
+
+  auto created_pull = js.create_consumer_group(natscpp::js_consumer_config{
+      .stream = stream,
+      .durable_name = pull_durable,
+      .filter_subject = subject,
+      .type = natscpp::js_consumer_type::pull,
+  });
+  assert(created_pull.stream_name == stream);
+
+  auto created_push = js.create_consumer_group(natscpp::js_consumer_config{
+      .stream = stream,
+      .durable_name = push_durable,
+      .filter_subject = subject,
+      .type = natscpp::js_consumer_type::push,
+  });
+  assert(created_push.stream_name == stream);
+
+  auto created_alias = js.create_consumer_group(natscpp::js_consumer_config{
+      .stream = stream,
+      .durable_name = alias_durable,
+      .filter_subject = subject,
+      .type = natscpp::js_consumer_type::push,
+  });
+  assert(created_alias.stream_name == stream);
+
+  for (int i = 0; i < 8; ++i) {
+    natscpp::js_publish_options opts;
+    opts.msg_id = "msg-" + ts + "-" + std::to_string(i);
+    opts.expected_stream = stream;
+    js.publish(subject, "payload-" + std::to_string(i), opts);
+  }
+
+  auto pull_consumer = js.pull_subscribe(subject, pull_durable);
+  auto pull_msg1 = pull_consumer.next(std::chrono::seconds(2));
+  assert(!pull_msg1.data().empty());
+  auto md = pull_msg1.get_metadata();
+  assert(md.stream == stream);
+  assert(md.consumer == pull_durable);
+  assert(md.sequence_stream >= 1);
+  assert(md.timestamp > 0);
+  assert(pull_msg1.sequence() >= 1);
+  assert(pull_msg1.timestamp() > 0);
+  pull_msg1.in_progress();
+  pull_msg1.ack_sync();
+
+  auto pull_msg2 = pull_consumer.next(std::chrono::seconds(2));
+  pull_msg2.ack();
+
+  auto pull_msg3 = pull_consumer.next(std::chrono::seconds(2));
+  pull_msg3.nak();
+
+  auto pull_msg4 = pull_consumer.next(std::chrono::seconds(2));
+  pull_msg4.nak_with_delay(std::chrono::milliseconds(1));
+
+  auto pull_msg5 = pull_consumer.next(std::chrono::seconds(2));
+  pull_msg5.term();
+
+  auto push_consumer = js.push_subscribe(subject, push_durable);
+  auto push_msg = push_consumer.next(std::chrono::seconds(2));
+  assert(!push_msg.data().empty());
+  push_msg.ack();
+
+  auto push_alias_consumer = js.subscribe(subject, alias_durable);
+  auto alias_msg = push_alias_consumer.next(std::chrono::seconds(2));
+  assert(!alias_msg.data().empty());
+  alias_msg.ack();
+
+  jsCtx* raw_ctx = nullptr;
+  assert(natsConnection_JetStream(&raw_ctx, nc.native_handle(), nullptr) == NATS_OK);
+  std::unique_ptr<jsCtx, void (*)(jsCtx*)> ctx_holder(raw_ctx, jsCtx_Destroy);
+
+  natsSubscription* raw_pull_sub = nullptr;
+  const std::string helper_durable = "helper" + ts;
+  assert(js_PullSubscribe(&raw_pull_sub, raw_ctx, subject.c_str(), helper_durable.c_str(), nullptr, nullptr, nullptr) ==
+         NATS_OK);
+  natscpp::subscription pull_sub(raw_pull_sub);
+
+  for (int i = 8; i < 11; ++i) {
+    js.publish(subject, "payload-" + std::to_string(i));
+  }
+
+  const auto queued_before = pull_sub.queued_messages();
+  (void)queued_before;
+
+  auto fetched = pull_sub.fetch(2, std::chrono::seconds(2));
+  assert(!fetched.empty());
+  for (auto& msg : fetched) {
+    msg.ack();
+  }
+
+  jsFetchRequest req{};
+  req.Batch = 1;
+  req.Expires = std::chrono::milliseconds(500).count() * 1000 * 1000;
+  auto fetched_req = pull_sub.fetch_request(req);
+  assert(!fetched_req.empty());
+  fetched_req.front().ack();
+
+  auto info = pull_sub.get_consumer_info();
+  assert(info.stream == stream);
+  assert(info.name == helper_durable);
+
+  auto mismatch = pull_sub.get_sequence_mismatch();
+  assert(!mismatch.has_value());
+
+  pull_sub.unsubscribe();
+  assert(!pull_sub.valid());
+}
+
 void test_connection_sync_and_async_roundtrip_if_server_available() {
   natscpp::connection nc;
   try {
@@ -860,5 +987,6 @@ int main() {
   test_kv_bucket_and_key_crud_if_server_available();
   test_kv_put_erase_and_entry_fields_if_server_available();
   test_kv_watchers_if_server_available();
+  test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_available();
   return 0;
 }
