@@ -2,6 +2,7 @@
 #include <natscpp/error.hpp>
 #include <natscpp/jetstream.hpp>
 #include <natscpp/message.hpp>
+#include <natscpp/kv.hpp>
 
 #include <cassert>
 #include <chrono>
@@ -80,8 +81,20 @@ void test_jetstream_and_consumers_move_semantics_on_empty_handles() {
   natscpp::js_push_consumer push_assigned;
   push_assigned = std::move(push_moved);
 
+  natscpp::kv_entry kv_entry_default;
+  natscpp::kv_entry kv_entry_moved = std::move(kv_entry_default);
+  natscpp::kv_entry kv_entry_assigned;
+  kv_entry_assigned = std::move(kv_entry_moved);
+
+  natscpp::key_value kv_default;
+  natscpp::key_value kv_moved = std::move(kv_default);
+  natscpp::key_value kv_assigned;
+  kv_assigned = std::move(kv_moved);
+
   assert(!pull_assigned.valid());
   assert(!push_assigned.valid());
+  assert(!kv_entry_assigned.valid());
+  assert(!kv_assigned.valid());
 }
 
 void test_connection_has_sync_and_async_apis() {
@@ -95,6 +108,7 @@ void test_connection_has_sync_and_async_apis() {
   });
   static_assert(requires { nc.request_sync("svc", "payload"); });
   static_assert(requires { nc.request_async("svc", "payload"); });
+  static_assert(requires { natscpp::key_value(nc, "bucket"); });
 }
 
 void test_connection_sync_and_async_roundtrip_if_server_available() {
