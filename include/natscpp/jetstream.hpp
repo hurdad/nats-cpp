@@ -159,7 +159,6 @@ class jetstream {
 
   void publish(std::string_view subject, std::string_view payload, const js_publish_options& opts = {}) {
     jsPubOptions pub_opts{};
-    bool has_opts = !opts.msg_id.empty() || !opts.expected_stream.empty();
     if (!opts.msg_id.empty()) {
       pub_opts.MsgId = opts.msg_id.c_str();
     }
@@ -169,7 +168,9 @@ class jetstream {
 
     jsPubAck* ack{};
     throw_on_error(js_Publish(&ack, ctx_, std::string(subject).c_str(), payload.data(),
-                              static_cast<int>(payload.size()), has_opts ? &pub_opts : nullptr, nullptr),
+                              static_cast<int>(payload.size()),
+                              (pub_opts.MsgId != nullptr || pub_opts.ExpectStream != nullptr) ? &pub_opts : nullptr,
+                              nullptr),
                    "js_Publish");
     if (ack != nullptr) {
       jsPubAck_Destroy(ack);

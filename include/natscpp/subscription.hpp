@@ -91,6 +91,7 @@ class subscription {
   }
 
   void unsubscribe() {
+    if (!sub_) return;
     throw_on_error(natsSubscription_Unsubscribe(sub_.get()), "natsSubscription_Unsubscribe");
     sub_.reset();
     release_callback();

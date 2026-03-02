@@ -444,6 +444,7 @@ void test_publish_request_variants_if_server_available() {
       nc.publish(std::string(msg.reply_to()), msg.data());
     }
   });
+  nc.flush();  // ensure server acknowledges the subscription before first request
 
   // request_string
   auto r1 = nc.request_string(subj, "hello-str", std::chrono::seconds(2));
