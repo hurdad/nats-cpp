@@ -93,6 +93,10 @@ auto pull = js.pull_subscribe("orders.created", "orders-worker");
 auto msg = pull.next(std::chrono::seconds(1));
 ```
 
+JetStream examples are available in:
+- `examples/jetstream_sync_example.cpp`
+- `examples/jetstream_async_example.cpp`
+
 If JetStream symbols are unavailable in your linked `nats.c`, APIs throw `natscpp::jetstream_not_available`.
 
 ## Trace propagation

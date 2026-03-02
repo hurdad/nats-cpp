@@ -60,6 +60,12 @@ if(NATSCPP_BUILD_EXAMPLES)
 
   add_executable(natscpp_async_example examples/async_example.cpp)
   target_link_libraries(natscpp_async_example PRIVATE natscpp::natscpp)
+
+  add_executable(natscpp_jetstream_sync_example examples/jetstream_sync_example.cpp)
+  target_link_libraries(natscpp_jetstream_sync_example PRIVATE natscpp::natscpp)
+
+  add_executable(natscpp_jetstream_async_example examples/jetstream_async_example.cpp)
+  target_link_libraries(natscpp_jetstream_async_example PRIVATE natscpp::natscpp)
 endif()
 
 include(CMakePackageConfigHelpers)
