@@ -5,6 +5,7 @@
 #include <natscpp/header.hpp>
 #include <natscpp/jetstream.hpp>
 #include <natscpp/kv.hpp>
+#include <natscpp/library.hpp>
 #include <natscpp/message.hpp>
 #include <natscpp/subscription.hpp>
 #include <natscpp/trace.hpp>
