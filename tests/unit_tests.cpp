@@ -4,6 +4,7 @@
 #include <natscpp/jetstream.hpp>
 #include <natscpp/message.hpp>
 #include <natscpp/kv.hpp>
+#include <natscpp/library.hpp>
 #include <natscpp/trace.hpp>
 
 #include <cassert>
@@ -227,6 +228,28 @@ void test_connection_has_sync_and_async_apis() {
     natscpp::natsOptions_SetNoEcho(opts, true);
   });
   static_assert(requires(natscpp::message m) { m.ack_sync(); m.nak_with_delay(std::chrono::milliseconds(10)); m.get_metadata(); });
+  static_assert(requires(char* buffer, size_t buf_len, FILE* stream, natsClientConfig* cfg,
+                         unsigned char** signature, int* signature_length) {
+    natscpp::nats_CheckCompatibility();
+    natscpp::nats_CheckCompatibilityImpl(1, 1, "1.0.0");
+    natscpp::nats_Close();
+    natscpp::nats_CloseAndWait(0);
+    natscpp::nats_CloseAndWait(std::chrono::milliseconds(1));
+    natscpp::nats_GetLastErrorStack(buffer, buf_len);
+    natscpp::nats_GetVersion();
+    natscpp::nats_GetVersionNumber();
+    natscpp::nats_Now();
+    natscpp::nats_NowInNanoSeconds();
+    natscpp::nats_NowMonotonicInNanoSeconds();
+    natscpp::nats_Open(100);
+    natscpp::nats_OpenWithConfig(cfg);
+    natscpp::nats_PrintLastErrorStack(stream);
+    natscpp::nats_ReleaseThreadMemory();
+    natscpp::nats_SetMessageDeliveryPoolSize(4);
+    natscpp::nats_Sign("seed", "nonce", signature, signature_length);
+    natscpp::nats_Sleep(1);
+    natscpp::nats_Sleep(std::chrono::milliseconds(1));
+  });
   static_assert(requires(natscpp::header h, const char** one, const char*** many, int* count) {
     natscpp::natsHeader_New(h);
     natscpp::natsHeader_Set(h, "k", "v");
