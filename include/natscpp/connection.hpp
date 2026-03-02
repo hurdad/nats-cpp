@@ -12,6 +12,7 @@
 #include <memory>
 #include <cstdlib>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -32,7 +33,91 @@ namespace natscpp {
 struct connection_options {
   std::string url{"nats://127.0.0.1:4222"};
   bool retry_on_failed_connect = false;
+
+  std::optional<std::string> token;
+  std::optional<std::string> user;
+  std::optional<std::string> password;
+  std::optional<std::string> user_credentials_file;
+  std::optional<std::string> user_nkey_seed_file;
+  std::optional<std::string> nkey_public;
+  natsSignatureHandler nkey_signature_cb = nullptr;
+  void* nkey_signature_closure = nullptr;
+
+  std::optional<bool> secure;
+  std::optional<std::string> ca_trusted_certificates_file;
+  std::optional<std::string> certificates_chain_file;
+  std::optional<std::string> private_key_file;
+  std::optional<bool> skip_server_verification;
+
+  std::function<void(natsConnection*)> closed_cb;
+  std::function<void(natsConnection*)> disconnected_cb;
+  std::function<void(natsConnection*)> reconnected_cb;
+  std::function<void(natsConnection*, natsSubscription*, natsStatus)> error_handler;
+  std::function<void(natsConnection*)> lame_duck_mode_cb;
+
+  std::optional<std::chrono::milliseconds> reconnect_wait;
+  std::optional<int> max_reconnect;
+  std::optional<std::chrono::milliseconds> ping_interval;
+  std::optional<std::chrono::milliseconds> timeout;
+  std::optional<std::string> name;
+  std::optional<bool> no_echo;
 };
+
+inline void natsOptions_SetToken(connection_options& opts, std::string token) { opts.token = std::move(token); }
+inline void natsOptions_SetNKey(connection_options& opts, std::string nkey_public, natsSignatureHandler sig_cb,
+                                void* sig_closure) {
+  opts.nkey_public = std::move(nkey_public);
+  opts.nkey_signature_cb = sig_cb;
+  opts.nkey_signature_closure = sig_closure;
+}
+inline void natsOptions_SetUserCredentialsFromFiles(connection_options& opts, std::string user_credentials_file,
+                                                    std::string seed_file = {}) {
+  opts.user_credentials_file = std::move(user_credentials_file);
+  opts.user_nkey_seed_file = std::move(seed_file);
+}
+inline void natsOptions_SetUserInfo(connection_options& opts, std::string user, std::string password) {
+  opts.user = std::move(user);
+  opts.password = std::move(password);
+}
+inline void natsOptions_SetSecure(connection_options& opts, bool secure) { opts.secure = secure; }
+inline void natsOptions_LoadCATrustedCertificates(connection_options& opts, std::string file_name) {
+  opts.ca_trusted_certificates_file = std::move(file_name);
+}
+inline void natsOptions_LoadCertificatesChain(connection_options& opts, std::string certs_file, std::string key_file) {
+  opts.certificates_chain_file = std::move(certs_file);
+  opts.private_key_file = std::move(key_file);
+}
+inline void natsOptions_SkipServerVerification(connection_options& opts, bool skip) {
+  opts.skip_server_verification = skip;
+}
+inline void natsOptions_SetClosedCB(connection_options& opts, std::function<void(natsConnection*)> cb) {
+  opts.closed_cb = std::move(cb);
+}
+inline void natsOptions_SetDisconnectedCB(connection_options& opts, std::function<void(natsConnection*)> cb) {
+  opts.disconnected_cb = std::move(cb);
+}
+inline void natsOptions_SetReconnectedCB(connection_options& opts, std::function<void(natsConnection*)> cb) {
+  opts.reconnected_cb = std::move(cb);
+}
+inline void natsOptions_SetErrorHandler(connection_options& opts,
+                                        std::function<void(natsConnection*, natsSubscription*, natsStatus)> cb) {
+  opts.error_handler = std::move(cb);
+}
+inline void natsOptions_SetLameDuckModeCB(connection_options& opts, std::function<void(natsConnection*)> cb) {
+  opts.lame_duck_mode_cb = std::move(cb);
+}
+inline void natsOptions_SetReconnectWait(connection_options& opts, std::chrono::milliseconds reconnect_wait) {
+  opts.reconnect_wait = reconnect_wait;
+}
+inline void natsOptions_SetMaxReconnect(connection_options& opts, int max_reconnect) {
+  opts.max_reconnect = max_reconnect;
+}
+inline void natsOptions_SetPingInterval(connection_options& opts, std::chrono::milliseconds ping_interval) {
+  opts.ping_interval = ping_interval;
+}
+inline void natsOptions_SetTimeout(connection_options& opts, std::chrono::milliseconds timeout) { opts.timeout = timeout; }
+inline void natsOptions_SetName(connection_options& opts, std::string name) { opts.name = std::move(name); }
+inline void natsOptions_SetNoEcho(connection_options& opts, bool no_echo) { opts.no_echo = no_echo; }
 
 /**
  * @brief Owns a natsConnection and provides modern C++ APIs.
@@ -62,6 +147,13 @@ class connection {
     throw_on_error(natsOptions_Create(&nopts), "natsOptions_Create");
     std::unique_ptr<natsOptions, void (*)(natsOptions*)> holder(nopts, natsOptions_Destroy);
     throw_on_error(natsOptions_SetURL(nopts, options.url.c_str()), "natsOptions_SetURL");
+    callback_handlers_.closed_cb = options.closed_cb;
+    callback_handlers_.disconnected_cb = options.disconnected_cb;
+    callback_handlers_.reconnected_cb = options.reconnected_cb;
+    callback_handlers_.error_handler = options.error_handler;
+    callback_handlers_.lame_duck_mode_cb = options.lame_duck_mode_cb;
+
+    apply_nats_options(nopts, options, &callback_handlers_);
     if (options.retry_on_failed_connect) {
       throw_on_error(natsOptions_SetRetryOnFailedConnect(nopts, true, nullptr, nullptr),
                      "natsOptions_SetRetryOnFailedConnect");
@@ -448,8 +540,127 @@ class connection {
     std::mutex mutex;
   };
 
+  struct callback_handlers {
+    std::function<void(natsConnection*)> closed_cb;
+    std::function<void(natsConnection*)> disconnected_cb;
+    std::function<void(natsConnection*)> reconnected_cb;
+    std::function<void(natsConnection*, natsSubscription*, natsStatus)> error_handler;
+    std::function<void(natsConnection*)> lame_duck_mode_cb;
+  };
+
+  static void closed_cb_bridge(natsConnection* nc, void* closure) {
+    auto* handlers = static_cast<callback_handlers*>(closure);
+    if (handlers->closed_cb) {
+      handlers->closed_cb(nc);
+    }
+  }
+
+  static void disconnected_cb_bridge(natsConnection* nc, void* closure) {
+    auto* handlers = static_cast<callback_handlers*>(closure);
+    if (handlers->disconnected_cb) {
+      handlers->disconnected_cb(nc);
+    }
+  }
+
+  static void reconnected_cb_bridge(natsConnection* nc, void* closure) {
+    auto* handlers = static_cast<callback_handlers*>(closure);
+    if (handlers->reconnected_cb) {
+      handlers->reconnected_cb(nc);
+    }
+  }
+
+  static void error_handler_bridge(natsConnection* nc, natsSubscription* sub, natsStatus err, void* closure) {
+    auto* handlers = static_cast<callback_handlers*>(closure);
+    if (handlers->error_handler) {
+      handlers->error_handler(nc, sub, err);
+    }
+  }
+
+  static void lame_duck_mode_cb_bridge(natsConnection* nc, void* closure) {
+    auto* handlers = static_cast<callback_handlers*>(closure);
+    if (handlers->lame_duck_mode_cb) {
+      handlers->lame_duck_mode_cb(nc);
+    }
+  }
+
+  static void apply_nats_options(natsOptions* nopts, const connection_options& options, callback_handlers* handlers) {
+    if (options.token) {
+      throw_on_error(::natsOptions_SetToken(nopts, options.token->c_str()), "natsOptions_SetToken");
+    }
+    if (options.nkey_public) {
+      throw_on_error(::natsOptions_SetNKey(nopts, options.nkey_public->c_str(), options.nkey_signature_cb,
+                                           options.nkey_signature_closure),
+                     "natsOptions_SetNKey");
+    }
+    if (options.user_credentials_file) {
+      const char* seed_file = options.user_nkey_seed_file ? options.user_nkey_seed_file->c_str() : nullptr;
+      throw_on_error(::natsOptions_SetUserCredentialsFromFiles(nopts, options.user_credentials_file->c_str(), seed_file),
+                     "natsOptions_SetUserCredentialsFromFiles");
+    }
+    if (options.user && options.password) {
+      throw_on_error(::natsOptions_SetUserInfo(nopts, options.user->c_str(), options.password->c_str()),
+                     "natsOptions_SetUserInfo");
+    }
+    if (options.secure) {
+      throw_on_error(::natsOptions_SetSecure(nopts, *options.secure), "natsOptions_SetSecure");
+    }
+    if (options.ca_trusted_certificates_file) {
+      throw_on_error(::natsOptions_LoadCATrustedCertificates(nopts, options.ca_trusted_certificates_file->c_str()),
+                     "natsOptions_LoadCATrustedCertificates");
+    }
+    if (options.certificates_chain_file && options.private_key_file) {
+      throw_on_error(::natsOptions_LoadCertificatesChain(nopts, options.certificates_chain_file->c_str(),
+                                                         options.private_key_file->c_str()),
+                     "natsOptions_LoadCertificatesChain");
+    }
+    if (options.skip_server_verification) {
+      throw_on_error(::natsOptions_SkipServerVerification(nopts, *options.skip_server_verification),
+                     "natsOptions_SkipServerVerification");
+    }
+    if (options.closed_cb) {
+      throw_on_error(::natsOptions_SetClosedCB(nopts, &closed_cb_bridge, handlers), "natsOptions_SetClosedCB");
+    }
+    if (options.disconnected_cb) {
+      throw_on_error(::natsOptions_SetDisconnectedCB(nopts, &disconnected_cb_bridge, handlers),
+                     "natsOptions_SetDisconnectedCB");
+    }
+    if (options.reconnected_cb) {
+      throw_on_error(::natsOptions_SetReconnectedCB(nopts, &reconnected_cb_bridge, handlers),
+                     "natsOptions_SetReconnectedCB");
+    }
+    if (options.error_handler) {
+      throw_on_error(::natsOptions_SetErrorHandler(nopts, &error_handler_bridge, handlers),
+                     "natsOptions_SetErrorHandler");
+    }
+    if (options.lame_duck_mode_cb) {
+      throw_on_error(::natsOptions_SetLameDuckModeCB(nopts, &lame_duck_mode_cb_bridge, handlers),
+                     "natsOptions_SetLameDuckModeCB");
+    }
+    if (options.reconnect_wait) {
+      throw_on_error(::natsOptions_SetReconnectWait(nopts, options.reconnect_wait->count()),
+                     "natsOptions_SetReconnectWait");
+    }
+    if (options.max_reconnect) {
+      throw_on_error(::natsOptions_SetMaxReconnect(nopts, *options.max_reconnect), "natsOptions_SetMaxReconnect");
+    }
+    if (options.ping_interval) {
+      throw_on_error(::natsOptions_SetPingInterval(nopts, options.ping_interval->count()),
+                     "natsOptions_SetPingInterval");
+    }
+    if (options.timeout) {
+      throw_on_error(::natsOptions_SetTimeout(nopts, options.timeout->count()), "natsOptions_SetTimeout");
+    }
+    if (options.name) {
+      throw_on_error(::natsOptions_SetName(nopts, options.name->c_str()), "natsOptions_SetName");
+    }
+    if (options.no_echo) {
+      throw_on_error(::natsOptions_SetNoEcho(nopts, *options.no_echo), "natsOptions_SetNoEcho");
+    }
+  }
+
   std::shared_ptr<natsConnection> conn_;
   std::shared_ptr<callback_state> callback_state_ = std::make_shared<callback_state>();
+  callback_handlers callback_handlers_;
 };
 
 }  // namespace natscpp
