@@ -276,10 +276,12 @@ class subscription {
     jsConsumerInfo* raw = nullptr;
     throw_on_error(natsSubscription_GetConsumerInfo(&raw, sub_.get(), nullptr, nullptr),
                    "natsSubscription_GetConsumerInfo");
-    std::unique_ptr<jsConsumerInfo, void (*)(jsConsumerInfo*)> holder(raw, jsConsumerInfo_Destroy);
     consumer_info out;
-    out.stream = raw->Stream != nullptr ? raw->Stream : "";
-    out.name = raw->Name != nullptr ? raw->Name : "";
+    if (raw != nullptr) {
+      std::unique_ptr<jsConsumerInfo, void (*)(jsConsumerInfo*)> holder(raw, jsConsumerInfo_Destroy);
+      out.stream = raw->Stream != nullptr ? raw->Stream : "";
+      out.name   = raw->Name   != nullptr ? raw->Name   : "";
+    }
     return out;
   }
 

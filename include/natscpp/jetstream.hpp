@@ -550,9 +550,9 @@ class jetstream {
 
     consumer_info out{};
     if (consumer_info_raw != nullptr) {
-      out.stream_name = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : "";
-      out.durable_name = consumer_info_raw->Name != nullptr ? consumer_info_raw->Name : "";
-      jsConsumerInfo_Destroy(consumer_info_raw);
+      std::unique_ptr<jsConsumerInfo, void (*)(jsConsumerInfo*)> holder(consumer_info_raw, jsConsumerInfo_Destroy);
+      out.stream_name  = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : "";
+      out.durable_name = consumer_info_raw->Name   != nullptr ? consumer_info_raw->Name   : "";
     }
 
     return out;
@@ -673,11 +673,11 @@ class jetstream {
   static js_pub_ack extract_pub_ack(jsPubAck* raw) {
     js_pub_ack out;
     if (raw != nullptr) {
+      std::unique_ptr<jsPubAck, void (*)(jsPubAck*)> holder(raw, jsPubAck_Destroy);
       out.stream    = raw->Stream    != nullptr ? raw->Stream    : "";
       out.sequence  = raw->Sequence;
       out.domain    = raw->Domain    != nullptr ? raw->Domain    : "";
       out.duplicate = raw->Duplicate;
-      jsPubAck_Destroy(raw);
     }
     return out;
   }
@@ -773,9 +773,9 @@ class jetstream {
         .durable_name = config.durable_name,
     };
     if (consumer_info_raw != nullptr) {
+      std::unique_ptr<jsConsumerInfo, void (*)(jsConsumerInfo*)> holder(consumer_info_raw, jsConsumerInfo_Destroy);
       out.stream_name  = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : out.stream_name;
       out.durable_name = consumer_info_raw->Name   != nullptr ? consumer_info_raw->Name   : out.durable_name;
-      jsConsumerInfo_Destroy(consumer_info_raw);
     }
 
     return out;

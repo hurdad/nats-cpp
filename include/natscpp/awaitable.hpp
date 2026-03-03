@@ -1,9 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <coroutine>
+#include <chrono>
 #include <future>
 #include <thread>
-#include <chrono>
 #include <utility>
 
 namespace natscpp {
@@ -16,6 +17,10 @@ namespace natscpp {
  * requiring shared_future (whose get() returns const T&, which cannot be
  * moved for move-only result types such as message).
  *
+ * A shared alive flag ensures the detached worker thread does not call
+ * h.resume() if the awaitable (and its owning coroutine) has been destroyed
+ * before the future becomes ready.
+ *
  * @note await_suspend spawns one detached thread per suspension. This is
  * sufficient for occasional use but is not suitable for high-frequency
  * coroutine suspension; use a thread pool or an async I/O executor in that
@@ -27,6 +32,11 @@ class future_awaitable {
   explicit future_awaitable(std::future<T> fut)
       : state_(std::make_shared<shared_state>(std::move(fut))) {}
 
+  ~future_awaitable() {
+    // Signal the worker thread (if any) that the awaitable is gone.
+    state_->alive.store(false, std::memory_order_release);
+  }
+
   [[nodiscard]] bool await_ready() const {
     return state_->fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
   }
@@ -34,7 +44,9 @@ class future_awaitable {
   void await_suspend(std::coroutine_handle<> h) {
     std::thread([s = state_, h]() mutable {
       s->fut.wait();
-      h.resume();
+      if (s->alive.load(std::memory_order_acquire)) {
+        h.resume();
+      }
     }).detach();
   }
 
@@ -44,6 +56,7 @@ class future_awaitable {
   struct shared_state {
     explicit shared_state(std::future<T> f) : fut(std::move(f)) {}
     std::future<T> fut;
+    std::atomic<bool> alive{true};
   };
   std::shared_ptr<shared_state> state_;
 };

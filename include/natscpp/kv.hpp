@@ -139,14 +139,14 @@ class kv_watcher {
 
   [[nodiscard]] bool valid() const noexcept { return watcher_ != nullptr; }
 
-  [[nodiscard]] kv_entry next(int64_t timeout_ms = -1) const {
+  [[nodiscard]] kv_entry next(int64_t timeout_ms = -1) {
     check_valid();
     kvEntry* entry = nullptr;
     throw_on_error(kvWatcher_Next(&entry, watcher_, timeout_ms), "kvWatcher_Next");
     return kv_entry{entry};
   }
 
-  void stop() const {
+  void stop() {
     check_valid();
     throw_on_error(kvWatcher_Stop(watcher_), "kvWatcher_Stop");
   }
@@ -467,15 +467,15 @@ class key_value {
     check_valid();
     kvStatus* raw = nullptr;
     throw_on_error(kvStore_Status(&raw, kv_), "kvStore_Status");
+    std::unique_ptr<kvStatus, void (*)(kvStatus*)> holder(raw, kvStatus_Destroy);
     bucket_status out;
     const char* b = kvStatus_Bucket(raw);
-    out.bucket = b != nullptr ? b : "";
-    out.values = kvStatus_Values(raw);
-    out.history = kvStatus_History(raw);
-    out.bytes = kvStatus_Bytes(raw);
-    out.ttl = kvStatus_TTL(raw);
+    out.bucket   = b != nullptr ? b : "";
+    out.values   = kvStatus_Values(raw);
+    out.history  = kvStatus_History(raw);
+    out.bytes    = kvStatus_Bytes(raw);
+    out.ttl      = kvStatus_TTL(raw);
     out.replicas = kvStatus_Replicas(raw);
-    kvStatus_Destroy(raw);
     return out;
   }
 
