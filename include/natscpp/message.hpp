@@ -126,17 +126,34 @@ class message {
 
   [[nodiscard]] bool is_no_responders() const noexcept { return msg_ != nullptr && natsMsg_IsNoResponders(msg_.get()); }
 
-  void ack() { throw_on_error(natsMsg_Ack(msg_.get(), nullptr), "natsMsg_Ack"); }
-  void ack_sync() { throw_on_error(natsMsg_AckSync(msg_.get(), nullptr, nullptr), "natsMsg_AckSync"); }
-  void nak() { throw_on_error(natsMsg_Nak(msg_.get(), nullptr), "natsMsg_Nak"); }
+  void ack() {
+    if (!msg_) throw nats_error(NATS_INVALID_ARG, "message::ack: not initialized");
+    throw_on_error(natsMsg_Ack(msg_.get(), nullptr), "natsMsg_Ack");
+  }
+  void ack_sync() {
+    if (!msg_) throw nats_error(NATS_INVALID_ARG, "message::ack_sync: not initialized");
+    throw_on_error(natsMsg_AckSync(msg_.get(), nullptr, nullptr), "natsMsg_AckSync");
+  }
+  void nak() {
+    if (!msg_) throw nats_error(NATS_INVALID_ARG, "message::nak: not initialized");
+    throw_on_error(natsMsg_Nak(msg_.get(), nullptr), "natsMsg_Nak");
+  }
   void nak_with_delay(std::chrono::milliseconds delay) {
+    if (!msg_) throw nats_error(NATS_INVALID_ARG, "message::nak_with_delay: not initialized");
     throw_on_error(natsMsg_NakWithDelay(msg_.get(), static_cast<int64_t>(delay.count()), nullptr),
                    "natsMsg_NakWithDelay");
   }
-  void in_progress() { throw_on_error(natsMsg_InProgress(msg_.get(), nullptr), "natsMsg_InProgress"); }
-  void term() { throw_on_error(natsMsg_Term(msg_.get(), nullptr), "natsMsg_Term"); }
+  void in_progress() {
+    if (!msg_) throw nats_error(NATS_INVALID_ARG, "message::in_progress: not initialized");
+    throw_on_error(natsMsg_InProgress(msg_.get(), nullptr), "natsMsg_InProgress");
+  }
+  void term() {
+    if (!msg_) throw nats_error(NATS_INVALID_ARG, "message::term: not initialized");
+    throw_on_error(natsMsg_Term(msg_.get(), nullptr), "natsMsg_Term");
+  }
 
   [[nodiscard]] metadata get_metadata() const {
+    if (!msg_) throw nats_error(NATS_INVALID_ARG, "message::get_metadata: not initialized");
     jsMsgMetaData* raw = nullptr;
     throw_on_error(natsMsg_GetMetaData(&raw, msg_.get()), "natsMsg_GetMetaData");
     std::unique_ptr<jsMsgMetaData, void (*)(jsMsgMetaData*)> holder(raw, jsMsgMetaData_Destroy);
