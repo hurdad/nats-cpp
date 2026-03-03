@@ -131,7 +131,7 @@ class connection {
     throw_on_error(natsOptions_SetURL(nopts, options.url.c_str()), "natsOptions_SetURL");
 
     // Build handlers on the heap so the pointer stored in nats.c remains valid after a move.
-    auto handlers = std::make_unique<callback_handlers>();
+    auto handlers = std::make_shared<callback_handlers>();
     handlers->closed_cb = options.closed_cb;
     handlers->disconnected_cb = options.disconnected_cb;
     handlers->reconnected_cb = options.reconnected_cb;
@@ -144,7 +144,9 @@ class connection {
                      "natsOptions_SetRetryOnFailedConnect");
     }
     throw_on_error(natsConnection_Connect(&raw, nopts), "natsConnection_Connect");
-    conn_.reset(raw, detail::connection_deleter{});
+    // Capture handlers in the deleter so they outlive the natsConnection even when
+    // request_async (or any other code) holds conn_ beyond this object's lifetime.
+    conn_.reset(raw, [h = handlers](natsConnection* p) { natsConnection_Destroy(p); });
     callback_handlers_ = std::move(handlers);
   }
 
@@ -207,6 +209,8 @@ class connection {
   void flush() { throw_on_error(natsConnection_Flush(conn_.get()), "natsConnection_Flush"); }
   void close() { natsConnection_Close(conn_.get()); }
   [[nodiscard]] std::array<unsigned char, 64> sign(std::string_view message) {
+    assert(message.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
+           "sign: message exceeds INT_MAX bytes");
     std::array<unsigned char, 64> sig{};
     throw_on_error(natsConnection_Sign(conn_.get(), reinterpret_cast<const unsigned char*>(message.data()),
                                        static_cast<int>(message.size()), sig.data()),
@@ -429,10 +433,10 @@ class connection {
   [[nodiscard]] std::string new_inbox() const {
     natsInbox* inbox = nullptr;
     throw_on_error(natsInbox_Create(&inbox), "natsInbox_Create");
+    // RAII guard ensures inbox is freed even if std::string construction throws OOM.
+    struct inbox_guard { natsInbox* p; ~inbox_guard() { natsInbox_Destroy(p); } } guard{inbox};
     // natsInbox is typedef char, so natsInbox* is char* — no cast needed.
-    std::string value{inbox};
-    natsInbox_Destroy(inbox);
-    return value;
+    return std::string{inbox};
   }
 
  private:
@@ -539,35 +543,45 @@ class connection {
   static void closed_cb_bridge(natsConnection* nc, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->closed_cb) {
-      handlers->closed_cb(nc);
+      try { handlers->closed_cb(nc); } catch (...) {
+        std::fprintf(stderr, "[natscpp] exception in closed callback, ignoring\n");
+      }
     }
   }
 
   static void disconnected_cb_bridge(natsConnection* nc, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->disconnected_cb) {
-      handlers->disconnected_cb(nc);
+      try { handlers->disconnected_cb(nc); } catch (...) {
+        std::fprintf(stderr, "[natscpp] exception in disconnected callback, ignoring\n");
+      }
     }
   }
 
   static void reconnected_cb_bridge(natsConnection* nc, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->reconnected_cb) {
-      handlers->reconnected_cb(nc);
+      try { handlers->reconnected_cb(nc); } catch (...) {
+        std::fprintf(stderr, "[natscpp] exception in reconnected callback, ignoring\n");
+      }
     }
   }
 
   static void error_handler_bridge(natsConnection* nc, natsSubscription* sub, natsStatus err, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->error_handler) {
-      handlers->error_handler(nc, sub, err);
+      try { handlers->error_handler(nc, sub, err); } catch (...) {
+        std::fprintf(stderr, "[natscpp] exception in error handler callback, ignoring\n");
+      }
     }
   }
 
   static void lame_duck_mode_cb_bridge(natsConnection* nc, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->lame_duck_mode_cb) {
-      handlers->lame_duck_mode_cb(nc);
+      try { handlers->lame_duck_mode_cb(nc); } catch (...) {
+        std::fprintf(stderr, "[natscpp] exception in lame duck mode callback, ignoring\n");
+      }
     }
   }
 
@@ -648,7 +662,7 @@ class connection {
 
   std::shared_ptr<natsConnection> conn_;
   std::shared_ptr<callback_state> callback_state_ = std::make_shared<callback_state>();
-  std::unique_ptr<callback_handlers> callback_handlers_;
+  std::shared_ptr<callback_handlers> callback_handlers_;
 };
 
 }  // namespace natscpp

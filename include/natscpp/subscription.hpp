@@ -98,6 +98,7 @@ class subscription {
   }
 
   [[nodiscard]] message next_message(std::chrono::milliseconds timeout) {
+    check_valid();
     natsMsg* raw{};
     throw_on_error(natsSubscription_NextMsg(&raw, sub_.get(), static_cast<int64_t>(timeout.count())),
                    "natsSubscription_NextMsg");
@@ -105,21 +106,25 @@ class subscription {
   }
 
   void auto_unsubscribe(int max_messages) {
+    check_valid();
     throw_on_error(natsSubscription_AutoUnsubscribe(sub_.get(), max_messages), "natsSubscription_AutoUnsubscribe");
   }
 
   [[nodiscard]] uint64_t queued_messages() const {
+    check_valid();
     uint64_t queued = 0;
     throw_on_error(natsSubscription_QueuedMsgs(sub_.get(), &queued), "natsSubscription_QueuedMsgs");
     return queued;
   }
 
   void set_pending_limits(int msg_limit, int bytes_limit) {
+    check_valid();
     throw_on_error(natsSubscription_SetPendingLimits(sub_.get(), msg_limit, bytes_limit),
                    "natsSubscription_SetPendingLimits");
   }
 
   [[nodiscard]] pending_limits get_pending_limits() const {
+    check_valid();
     pending_limits result;
     throw_on_error(natsSubscription_GetPendingLimits(sub_.get(), &result.messages, &result.bytes),
                    "natsSubscription_GetPendingLimits");
@@ -127,33 +132,42 @@ class subscription {
   }
 
   [[nodiscard]] pending_state pending() const {
+    check_valid();
     pending_state result;
-    throw_on_error(natsSubscription_GetPending(sub_.get(), &result.messages, &result.bytes), "natsSubscription_GetPending");
+    throw_on_error(natsSubscription_GetPending(sub_.get(), &result.messages, &result.bytes),
+                   "natsSubscription_GetPending");
     return result;
   }
 
   [[nodiscard]] int64_t delivered() const {
+    check_valid();
     int64_t value = 0;
     throw_on_error(natsSubscription_GetDelivered(sub_.get(), &value), "natsSubscription_GetDelivered");
     return value;
   }
 
   [[nodiscard]] int64_t dropped() const {
+    check_valid();
     int64_t value = 0;
     throw_on_error(natsSubscription_GetDropped(sub_.get(), &value), "natsSubscription_GetDropped");
     return value;
   }
 
   [[nodiscard]] pending_state max_pending() const {
+    check_valid();
     pending_state result;
     throw_on_error(natsSubscription_GetMaxPending(sub_.get(), &result.messages, &result.bytes),
                    "natsSubscription_GetMaxPending");
     return result;
   }
 
-  void clear_max_pending() { throw_on_error(natsSubscription_ClearMaxPending(sub_.get()), "natsSubscription_ClearMaxPending"); }
+  void clear_max_pending() {
+    check_valid();
+    throw_on_error(natsSubscription_ClearMaxPending(sub_.get()), "natsSubscription_ClearMaxPending");
+  }
 
   [[nodiscard]] stats get_stats() const {
+    check_valid();
     stats s;
     throw_on_error(natsSubscription_GetStats(sub_.get(), &s.pending_messages, &s.pending_bytes, &s.max_pending_messages,
                                              &s.max_pending_bytes, &s.delivered_messages, &s.dropped_messages),
@@ -161,15 +175,24 @@ class subscription {
     return s;
   }
 
-  void no_delivery_delay() { throw_on_error(natsSubscription_NoDeliveryDelay(sub_.get()), "natsSubscription_NoDeliveryDelay"); }
-  void drain() { throw_on_error(natsSubscription_Drain(sub_.get()), "natsSubscription_Drain"); }
+  void no_delivery_delay() {
+    check_valid();
+    throw_on_error(natsSubscription_NoDeliveryDelay(sub_.get()), "natsSubscription_NoDeliveryDelay");
+  }
+
+  void drain() {
+    check_valid();
+    throw_on_error(natsSubscription_Drain(sub_.get()), "natsSubscription_Drain");
+  }
 
   void drain(std::chrono::milliseconds timeout) {
+    check_valid();
     throw_on_error(natsSubscription_DrainTimeout(sub_.get(), static_cast<int64_t>(timeout.count())),
                    "natsSubscription_DrainTimeout");
   }
 
   void wait_for_drain_completion(std::chrono::milliseconds timeout) {
+    check_valid();
     throw_on_error(natsSubscription_WaitForDrainCompletion(sub_.get(), static_cast<int64_t>(timeout.count())),
                    "natsSubscription_WaitForDrainCompletion");
   }
@@ -179,6 +202,7 @@ class subscription {
   }
 
   void set_on_complete_callback(std::function<void()> cb) {
+    check_valid();
     auto token = std::make_shared<std::function<void()>>(std::move(cb));
     {
       std::lock_guard<std::mutex> lock(completion_callbacks_mutex_);
@@ -214,6 +238,7 @@ class subscription {
   }
 
   [[nodiscard]] std::vector<message> fetch(int batch, std::chrono::milliseconds timeout) {
+    check_valid();
     natsMsgList list{};
     throw_on_error(natsSubscription_Fetch(&list, sub_.get(), batch, static_cast<int64_t>(timeout.count()), nullptr),
                    "natsSubscription_Fetch");
@@ -229,6 +254,7 @@ class subscription {
   }
 
   [[nodiscard]] std::vector<message> fetch_request(jsFetchRequest& request) {
+    check_valid();
     natsMsgList list{};
     throw_on_error(natsSubscription_FetchRequest(&list, sub_.get(), &request), "natsSubscription_FetchRequest");
     struct list_guard { natsMsgList& l; ~list_guard() { natsMsgList_Destroy(&l); } } guard{list};
@@ -243,6 +269,7 @@ class subscription {
   }
 
   [[nodiscard]] consumer_info get_consumer_info() const {
+    check_valid();
     jsConsumerInfo* raw = nullptr;
     throw_on_error(natsSubscription_GetConsumerInfo(&raw, sub_.get(), nullptr, nullptr),
                    "natsSubscription_GetConsumerInfo");
@@ -254,6 +281,7 @@ class subscription {
   }
 
   [[nodiscard]] std::optional<consumer_sequence_mismatch> get_sequence_mismatch() const {
+    check_valid();
     jsConsumerSequenceMismatch mismatch{};
     natsStatus s = natsSubscription_GetSequenceMismatch(&mismatch, sub_.get());
     if (s == NATS_NOT_FOUND) {
@@ -265,6 +293,12 @@ class subscription {
 
 
  private:
+  void check_valid() const {
+    if (!sub_) {
+      throw nats_error(NATS_INVALID_ARG, "subscription: not initialized");
+    }
+  }
+
   void release_callback() noexcept {
     if (on_release_) {
       on_release_();

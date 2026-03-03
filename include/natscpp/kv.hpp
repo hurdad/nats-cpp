@@ -2,6 +2,7 @@
 
 #include <nats/nats.h>
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -112,7 +113,7 @@ struct kv_watch_options {
   bool ignore_deletes = false;
   bool include_history = false;
   bool meta_only = false;
-  int64_t timeout = 0;
+  std::chrono::milliseconds timeout{0};
   bool updates_only = false;
 };
 
@@ -138,16 +139,24 @@ class kv_watcher {
   [[nodiscard]] bool valid() const noexcept { return watcher_ != nullptr; }
 
   [[nodiscard]] kv_entry next(int64_t timeout_ms = -1) const {
+    check_valid();
     kvEntry* entry = nullptr;
     throw_on_error(kvWatcher_Next(&entry, watcher_, timeout_ms), "kvWatcher_Next");
     return kv_entry{entry};
   }
 
   void stop() const {
+    check_valid();
     throw_on_error(kvWatcher_Stop(watcher_), "kvWatcher_Stop");
   }
 
  private:
+  void check_valid() const {
+    if (watcher_ == nullptr) {
+      throw nats_error(NATS_INVALID_ARG, "kv_watcher: not initialized");
+    }
+  }
+
   kvWatcher* watcher_{};
 };
 
@@ -363,7 +372,7 @@ class key_value {
     native.IgnoreDeletes = options->ignore_deletes;
     native.IncludeHistory = options->include_history;
     native.MetaOnly = options->meta_only;
-    native.Timeout = options->timeout;
+    native.Timeout = static_cast<int64_t>(options->timeout.count());
     native.UpdatesOnly = options->updates_only;
     return native;
   }
