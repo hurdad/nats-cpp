@@ -12,6 +12,7 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
 - [API examples](#api-examples)
   - [Sync API example](#sync-api-example)
   - [Async API example](#async-api-example)
+  - [API mapping](#api-mapping)
   - [JetStream](#jetstream)
   - [KeyValue](#keyvalue)
   - [Trace propagation](#trace-propagation)
@@ -33,7 +34,6 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
 - Stream + consumer-group creation helpers (`create_stream`, `create_consumer_group`).
 - KeyValue wrappers (open bucket, put/get/delete entries, watch key updates).
 - Trace propagation helpers using NATS headers (`TraceCarrier` concept).
-- Graceful JetStream fallback when linked `nats.c` does not expose JetStream symbols.
 
 ## Requirements
 
@@ -96,7 +96,7 @@ When `NATSCPP_BUILD_EXAMPLES=ON` (default), the following example targets are bu
 
 ## API examples
 
-## Sync API example
+### Sync API example
 
 ```cpp
 #include <chrono>
@@ -114,7 +114,7 @@ int main() {
 }
 ```
 
-## Async API example
+### Async API example
 
 ```cpp
 #include <chrono>
@@ -137,7 +137,7 @@ int main() {
 }
 ```
 
-## API mapping
+### API mapping
 
 - Synchronous subscribe: `subscribe_sync`, `subscribe_queue_sync`
 - Asynchronous callback subscribe: `subscribe_async`, `subscribe_queue_async`
@@ -174,19 +174,16 @@ JetStream examples are available in:
 - `examples/jetstream_async_pull_example.cpp`
 - `examples/jetstream_async_push_example.cpp`
 
-
-If JetStream symbols are unavailable in your linked `nats.c`, APIs throw `natscpp::jetstream_not_available`.
-
-
 ## KeyValue
 
 ```cpp
+#include <natscpp/connection.hpp>
 #include <natscpp/kv.hpp>
 
-natscpp::connection nc;
-natscpp::key_value kv(nc, "profiles");
+natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
+auto kv = natscpp::key_value::create(nc, "profiles");
 
-kv.put("user-1", R"({"name":"Ada"})");
+auto rev = kv.put("user-1", R"({"name":"Ada"})");
 auto entry = kv.get("user-1");
 
 natscpp::kv_watch_options watch_opts;
@@ -194,10 +191,11 @@ watch_opts.updates_only = true;
 auto watcher = kv.watch("user-1", &watch_opts);
 
 kv.put("user-1", R"({"name":"Ada","active":true})");
-auto updated = watcher.next(std::chrono::seconds(1).count() * 1000);
+auto updated = watcher.next(1000);  // timeout in milliseconds
 watcher.stop();
 
 kv.erase("user-1");
+natscpp::key_value::delete_bucket(nc, "profiles");
 ```
 
 Watch APIs:
@@ -205,26 +203,7 @@ Watch APIs:
 - `watch_multi(keys, opts)` for multiple keys/filters
 - `watch_all(opts)` for all keys in the bucket
 
-`kv_watcher::next()` may return an invalid `kv_entry` (`entry.valid() == false`) when the initial snapshot is complete.
-
-## KeyValue example
-
-```cpp
-#include <natscpp/connection.hpp>
-#include <natscpp/kv.hpp>
-
-int main() {
-  natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
-
-  auto kv = natscpp::key_value::create(nc, "demo_profiles");
-
-  auto rev = kv.put("user-1", R"({"name":"Ada"})");
-  auto entry = kv.get("user-1");
-  kv.erase("user-1");
-  natscpp::key_value::delete_bucket(nc, "demo_profiles");
-  return rev > 0 && entry.key() == "user-1" ? 0 : 1;
-}
-```
+`kv_watcher::next()` takes a timeout in milliseconds. It may return an invalid `kv_entry` (`entry.valid() == false`) when the initial snapshot is complete.
 
 KeyValue example is available in:
 - `examples/kv_example.cpp`
@@ -258,9 +237,13 @@ natscpp::extract_trace_context(carrier, keys, extracted);
 - `#include <natscpp/connection.hpp>`
 - `#include <natscpp/message.hpp>`
 - `#include <natscpp/subscription.hpp>`
+- `#include <natscpp/header.hpp>`
+- `#include <natscpp/awaitable.hpp>`
 - `#include <natscpp/jetstream.hpp>`
 - `#include <natscpp/kv.hpp>`
 - `#include <natscpp/trace.hpp>`
+- `#include <natscpp/error.hpp>`
+- `#include <natscpp/library.hpp>`
 
 ## Notes
 
