@@ -2,6 +2,22 @@
 
 Modern, header-only **C++20** wrappers for the official [`nats.c`](https://github.com/nats-io/nats.c) client.
 
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Build and test](#build-and-test)
+- [Install](#install)
+- [Example programs](#example-programs)
+- [API examples](#api-examples)
+  - [Sync API example](#sync-api-example)
+  - [Async API example](#async-api-example)
+  - [JetStream](#jetstream)
+  - [KeyValue](#keyvalue)
+  - [Trace propagation](#trace-propagation)
+- [Includes](#includes)
+- [Notes](#notes)
+
 ## Features
 
 - Header-only API in the `natscpp` namespace.
@@ -37,7 +53,17 @@ ctest --test-dir build --output-on-failure
 
 If `third_party/nats.c` is not initialized, configure will fail unless `libnats` is installed and visible to `pkg-config`.
 
-## Installation with CMake
+## Install
+
+Install headers and CMake package metadata:
+
+```bash
+cmake -S . -B build
+cmake --build build
+cmake --install build --prefix /your/install/prefix
+```
+
+Then consume via CMake:
 
 ```cmake
 find_package(natscpp CONFIG REQUIRED)
@@ -66,6 +92,10 @@ When `NATSCPP_BUILD_EXAMPLES=ON` (default), the following example targets are bu
 - `natscpp_jetstream_async_push_example`
 - `natscpp_kv_example`
 
+> Most examples expect a local NATS server at `nats://127.0.0.1:4222`.
+
+## API examples
+
 ## Sync API example
 
 ```cpp
@@ -90,15 +120,21 @@ int main() {
 #include <chrono>
 #include <natscpp/connection.hpp>
 
-natscpp::connection nc;
-auto sub = nc.subscribe_async("demo.async.events", [](natscpp::message msg) {
-  // callback invoked by nats.c dispatcher thread
-});
+int main() {
+  natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
 
-nc.publish("demo.async.events", "hello async");
-auto fut = nc.request_async("svc.echo", "ping async", std::chrono::seconds(2));
-auto async_reply = fut.get();
-sub.unsubscribe();
+  auto sub = nc.subscribe_async("demo.async.events", [](natscpp::message msg) {
+    // callback invoked by nats.c dispatcher thread
+    (void)msg;
+  });
+
+  nc.publish("demo.async.events", "hello async");
+  auto fut = nc.request_async("svc.echo", "ping async", std::chrono::seconds(2));
+  auto async_reply = fut.get();
+  sub.unsubscribe();
+
+  return async_reply.data().empty() ? 1 : 0;
+}
 ```
 
 ## API mapping
