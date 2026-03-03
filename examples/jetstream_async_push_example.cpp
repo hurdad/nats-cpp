@@ -1,8 +1,26 @@
-#include <chrono>
-#include <thread>
+#include <future>
+#include <iostream>
 
 #include <natscpp/connection.hpp>
 #include <natscpp/jetstream.hpp>
+
+// Delivery pattern: WORK QUEUE
+//   A single durable consumer is shared across all subscribers. NATS delivers each message to
+//   exactly one subscriber (competing consumers). This is the pattern shown below.
+//
+// To implement PUB/SUB fan-out instead:
+//   Create a separate consumer group per subscriber, each with a unique durable name and
+//   deliver_subject. Every subscriber then independently receives every message.
+//
+//     js.create_consumer_group({.stream = "STREAM", .durable_name = "worker-a",
+//                                .filter_subject = subject,
+//                                .deliver_subject = "delivery.a", .type = push});
+//     js.create_consumer_group({.stream = "STREAM", .durable_name = "worker-b",
+//                                .filter_subject = subject,
+//                                .deliver_subject = "delivery.b", .type = push});
+//     auto consumer_a = js.push_subscribe(subject, "worker-a");
+//     auto consumer_b = js.push_subscribe(subject, "worker-b");
+//     // consumer_a and consumer_b each receive every published message
 
 int main() {
   natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
@@ -21,9 +39,15 @@ int main() {
   });
 
   auto consumer = js.push_subscribe(subject, durable);
-  (void) consumer;
+
+  // Start waiting for the message before publishing so the receive does not block the main thread.
+  auto next_msg = std::async(std::launch::async, [&consumer] {
+    return consumer.next(std::chrono::seconds(2));
+  });
 
   js.publish(subject, "hello-jetstream-async-push");
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  auto msg = next_msg.get();
+  std::cout << "jetstream async push received: " << msg.data() << '\n';
   return 0;
 }

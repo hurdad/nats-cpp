@@ -5,6 +5,22 @@
 #include <natscpp/connection.hpp>
 #include <natscpp/jetstream.hpp>
 
+// Delivery pattern: WORK QUEUE
+//   A single durable consumer is shared across all subscribers. NATS delivers each message to
+//   exactly one subscriber (competing consumers). This is the pattern shown below.
+//
+// To implement PUB/SUB fan-out instead:
+//   Create a separate consumer group per subscriber, each with a unique durable name. Every
+//   subscriber then independently receives every message.
+//
+//     js.create_consumer_group({.stream = "STREAM", .durable_name = "worker-a",
+//                                .filter_subject = subject, .type = pull});
+//     js.create_consumer_group({.stream = "STREAM", .durable_name = "worker-b",
+//                                .filter_subject = subject, .type = pull});
+//     auto consumer_a = js.pull_subscribe(subject, "worker-a");
+//     auto consumer_b = js.pull_subscribe(subject, "worker-b");
+//     // consumer_a and consumer_b each receive every published message
+
 int main() {
   natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
   natscpp::jetstream js(nc);
