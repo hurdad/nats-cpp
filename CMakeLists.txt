@@ -55,7 +55,12 @@ else()
 endif()
 
 if(BUILD_TESTING)
-  add_executable(natscpp_unit_tests tests/unit_tests.cpp)
+  add_executable(natscpp_unit_tests
+    tests/unit_tests_main.cpp
+    tests/unit_tests_core.cpp
+    tests/unit_tests_api_surface.cpp
+    tests/unit_tests_integration.cpp
+  )
   target_link_libraries(natscpp_unit_tests PRIVATE natscpp::natscpp)
   add_test(NAME natscpp_unit_tests COMMAND natscpp_unit_tests)
 endif()
