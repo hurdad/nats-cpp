@@ -210,6 +210,46 @@ void test_subscription_default_constructor() {
   assert(sub.drain_completion_status() == NATS_OK);
 }
 
+void test_subscription_requires_valid_handle_for_stateful_operations() {
+  natscpp::subscription sub;
+
+  auto expect_invalid_subscription = [](auto&& op) {
+    try {
+      op();
+      assert(false && "expected nats_error");
+    } catch (const natscpp::nats_error& ex) {
+      assert(ex.status() == NATS_INVALID_ARG);
+      const std::string what{ex.what()};
+      assert(what.find("subscription: not initialized") != std::string::npos);
+    }
+  };
+
+  expect_invalid_subscription([&] { (void)sub.next_message(std::chrono::milliseconds(1)); });
+  expect_invalid_subscription([&] { sub.auto_unsubscribe(1); });
+  expect_invalid_subscription([&] { (void)sub.queued_messages(); });
+  expect_invalid_subscription([&] { sub.set_pending_limits(1, 1); });
+  expect_invalid_subscription([&] { (void)sub.get_pending_limits(); });
+  expect_invalid_subscription([&] { (void)sub.pending(); });
+  expect_invalid_subscription([&] { (void)sub.delivered(); });
+  expect_invalid_subscription([&] { (void)sub.dropped(); });
+  expect_invalid_subscription([&] { (void)sub.max_pending(); });
+  expect_invalid_subscription([&] { sub.clear_max_pending(); });
+  expect_invalid_subscription([&] { (void)sub.get_stats(); });
+  expect_invalid_subscription([&] { sub.no_delivery_delay(); });
+  expect_invalid_subscription([&] { sub.drain(); });
+  expect_invalid_subscription([&] { sub.drain(std::chrono::milliseconds(1)); });
+  expect_invalid_subscription([&] { sub.wait_for_drain_completion(std::chrono::milliseconds(1)); });
+  expect_invalid_subscription([&] { sub.set_on_complete_callback([] {}); });
+  expect_invalid_subscription([&] { (void)sub.fetch(1, std::chrono::milliseconds(1)); });
+  expect_invalid_subscription([&] {
+    jsFetchRequest req{};
+    req.Batch = 1;
+    (void)sub.fetch_request(req);
+  });
+  expect_invalid_subscription([&] { (void)sub.get_consumer_info(); });
+  expect_invalid_subscription([&] { (void)sub.get_sequence_mismatch(); });
+}
+
 void test_new_inbox_generates_unique_subjects() {
   natscpp::connection nc;
   const auto a = nc.new_inbox();
@@ -295,6 +335,7 @@ void run_core_unit_tests() {
   test_jetstream_and_consumers_move_semantics_on_empty_handles();
   test_subscription_release_callback_lifecycle();
   test_subscription_default_constructor();
+  test_subscription_requires_valid_handle_for_stateful_operations();
   test_new_inbox_generates_unique_subjects();
   test_trace_carrier_concept_and_helpers();
   test_message_trace_carrier_reads_and_writes_headers();
