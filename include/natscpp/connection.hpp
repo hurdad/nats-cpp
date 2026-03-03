@@ -195,9 +195,7 @@ class connection {
   void publish(message msg) {
     natsMsg* raw = msg.release();
     natsStatus status = natsConnection_PublishMsg(conn_.get(), raw);
-    if (status != NATS_OK) {
-      natsMsg_Destroy(raw);
-    }
+    natsMsg_Destroy(raw);  // natsConnection_PublishMsg never takes ownership
     throw_on_error(status, "natsConnection_PublishMsg");
   }
 
@@ -393,9 +391,7 @@ class connection {
     natsMsg* reply{};
     natsMsg* raw = request_message.release();
     natsStatus status = natsConnection_RequestMsg(&reply, conn_.get(), raw, static_cast<int64_t>(timeout.count()));
-    if (status != NATS_OK) {
-      natsMsg_Destroy(raw);
-    }
+    natsMsg_Destroy(raw);  // natsConnection_RequestMsg never takes ownership
     throw_on_error(status, "natsConnection_RequestMsg");
     return message{reply};
   }

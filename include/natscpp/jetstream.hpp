@@ -82,6 +82,7 @@ class js_pull_consumer {
   [[nodiscard]] bool valid() const noexcept { return sub_ != nullptr; }
 
   [[nodiscard]] message next(std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
+    if (sub_ == nullptr) throw nats_error(NATS_INVALID_ARG, "js_pull_consumer: not initialized");
     natsMsgList list{};
     throw_on_error(natsSubscription_Fetch(&list, sub_, 1, static_cast<int64_t>(timeout.count()), nullptr),
                    "natsSubscription_Fetch");
@@ -123,6 +124,7 @@ class js_push_consumer {
   [[nodiscard]] bool valid() const noexcept { return sub_ != nullptr; }
 
   [[nodiscard]] message next(std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
+    if (sub_ == nullptr) throw nats_error(NATS_INVALID_ARG, "js_push_consumer: not initialized");
     natsMsg* msg{};
     throw_on_error(natsSubscription_NextMsg(&msg, sub_, static_cast<int64_t>(timeout.count())),
                    "natsSubscription_NextMsg");
@@ -160,6 +162,7 @@ class jetstream {
   }
 
   void publish(std::string_view subject, std::string_view payload, const js_publish_options& opts = {}) {
+    check_valid();
     jsPubOptions pub_opts{};
     if (!opts.msg_id.empty()) {
       pub_opts.MsgId = opts.msg_id.c_str();
@@ -180,6 +183,7 @@ class jetstream {
   }
 
   [[nodiscard]] js_pull_consumer pull_subscribe(std::string_view stream_subject, std::string_view durable_name) {
+    check_valid();
     natsSubscription* sub{};
     throw_on_error(js_PullSubscribe(&sub, ctx_, std::string(stream_subject).c_str(),
                                     std::string(durable_name).c_str(), nullptr, nullptr, nullptr),
@@ -188,6 +192,7 @@ class jetstream {
   }
 
   [[nodiscard]] js_push_consumer push_subscribe(std::string_view stream_subject, std::string_view durable_name) {
+    check_valid();
     std::string durable_str(durable_name);
     jsSubOptions sub_opts{};
     if (!durable_str.empty()) {
@@ -202,10 +207,12 @@ class jetstream {
   }
 
   [[nodiscard]] js_push_consumer subscribe(std::string_view stream_subject, std::string_view durable_name) {
+    check_valid();
     return push_subscribe(stream_subject, durable_name);
   }
 
   [[nodiscard]] stream_info create_stream(const js_stream_config& config) {
+    check_valid();
     if (config.name.empty()) {
       throw std::invalid_argument("stream name cannot be empty");
     }
@@ -239,6 +246,7 @@ class jetstream {
   }
 
   [[nodiscard]] consumer_info get_consumer_group(std::string_view stream, std::string_view durable_name) {
+    check_valid();
     if (stream.empty()) {
       throw std::invalid_argument("consumer stream cannot be empty");
     }
@@ -262,6 +270,7 @@ class jetstream {
   }
 
   void delete_consumer_group(std::string_view stream, std::string_view durable_name) {
+    check_valid();
     if (stream.empty()) {
       throw std::invalid_argument("consumer stream cannot be empty");
     }
@@ -275,6 +284,7 @@ class jetstream {
   }
 
   [[nodiscard]] std::vector<consumer_info> list_consumer_groups(std::string_view stream) {
+    check_valid();
     if (stream.empty()) {
       throw std::invalid_argument("consumer stream cannot be empty");
     }
@@ -306,6 +316,7 @@ class jetstream {
   }
 
   [[nodiscard]] std::vector<std::string> list_consumer_group_names(std::string_view stream) {
+    check_valid();
     if (stream.empty()) {
       throw std::invalid_argument("consumer stream cannot be empty");
     }
@@ -330,6 +341,10 @@ class jetstream {
   }
 
  private:
+  void check_valid() const {
+    if (ctx_ == nullptr) throw nats_error(NATS_INVALID_ARG, "jetstream: not initialized");
+  }
+
   [[nodiscard]] consumer_info upsert_consumer_group(const js_consumer_config& config, bool update) {
     if (config.stream.empty()) {
       throw std::invalid_argument("consumer stream cannot be empty");

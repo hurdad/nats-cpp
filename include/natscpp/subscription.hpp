@@ -57,7 +57,10 @@ class subscription {
   explicit subscription(natsSubscription* raw, std::function<void()> on_release = {})
       : sub_(raw), on_release_(std::move(on_release)) {}
 
-  ~subscription() { release_callback(); }
+  ~subscription() {
+    sub_.reset();  // stop nats.c delivery before releasing the closure pointer
+    release_callback();
+  }
 
   subscription(subscription&& other) noexcept
       : sub_(std::move(other.sub_)),
