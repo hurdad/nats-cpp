@@ -31,9 +31,14 @@ namespace natscpp {
  * @brief Connection options used to open a NATS connection.
  */
 struct connection_options {
+  // Primary server URL (used when urls is empty).
   std::string url{"nats://127.0.0.1:4222"};
+  // Multiple server URLs for cluster / failover (takes precedence over url when non-empty).
+  std::vector<std::string> urls;
+
   bool retry_on_failed_connect = false;
 
+  // --- Authentication ---
   std::optional<std::string> token;
   std::optional<std::string> user;
   std::optional<std::string> password;
@@ -42,27 +47,71 @@ struct connection_options {
   std::optional<std::string> nkey_public;
   natsSignatureHandler nkey_signature_cb = nullptr;
   void* nkey_signature_closure = nullptr;
+  // Dynamic token handler (callback invoked on each connect/reconnect).
+  natsTokenHandler token_handler_cb = nullptr;
+  void* token_handler_closure = nullptr;
 
+  // --- TLS ---
   std::optional<bool> secure;
   std::optional<std::string> ca_trusted_certificates_file;
+  std::optional<std::string> ca_certs_path;           // directory of CA certificates
   std::optional<std::string> certificates_chain_file;
   std::optional<std::string> private_key_file;
   std::optional<bool> skip_server_verification;
+  std::optional<std::string> expected_hostname;       // TLS SNI override
+  std::optional<std::string> ciphers;
+  std::optional<std::string> cipher_suites;
 
+  // --- Connection lifecycle callbacks ---
   std::function<void(natsConnection*)> closed_cb;
   std::function<void(natsConnection*)> disconnected_cb;
   std::function<void(natsConnection*)> reconnected_cb;
   std::function<void(natsConnection*, natsSubscription*, natsStatus)> error_handler;
   std::function<void(natsConnection*)> lame_duck_mode_cb;
+  std::function<void(natsConnection*)> discovered_servers_cb;
 
+  // --- Reconnect behaviour ---
   std::optional<std::chrono::milliseconds> reconnect_wait;
   std::optional<int> max_reconnect;
+  std::optional<bool> allow_reconnect;
+  std::optional<bool> no_randomize;
+  std::optional<int> max_pings_out;
+  std::optional<int> reconnect_buf_size;
+  // Jitter added to reconnect wait: {plain_ms, tls_ms}.
+  std::optional<std::pair<int64_t, int64_t>> reconnect_jitter;
+
+  // --- Subscription back-pressure ---
+  std::optional<int> max_pending_msgs;
+  std::optional<int64_t> max_pending_bytes;
+
+  // --- I/O tuning ---
+  std::optional<int> io_buf_size;
+  std::optional<bool> send_asap;
+
+  // --- Cluster / server discovery ---
+  std::optional<bool> fail_requests_on_disconnect;
+  std::optional<bool> ignore_discovered_servers;
+
+  // --- Protocol tweaks ---
+  std::optional<bool> disable_no_responders;
+  std::optional<bool> use_old_request_style;
+  std::optional<std::string> custom_inbox_prefix;
+  std::optional<bool> pedantic;
+  std::optional<bool> verbose;
+
+  // --- Convenience setters ---
   std::optional<std::chrono::milliseconds> ping_interval;
   std::optional<std::chrono::milliseconds> timeout;
   std::optional<std::string> name;
   std::optional<bool> no_echo;
 
-  void set_token(std::string token) { this->token = std::move(token); }
+  void set_url(std::string u) { url = std::move(u); }
+  void set_urls(std::vector<std::string> server_urls) { urls = std::move(server_urls); }
+  void set_token(std::string t) { this->token = std::move(t); }
+  void set_token_handler(natsTokenHandler handler, void* closure) {
+    token_handler_cb = handler;
+    token_handler_closure = closure;
+  }
   void set_nkey(std::string nkey_public, natsSignatureHandler sig_cb, void* sig_closure) {
     this->nkey_public = std::move(nkey_public);
     nkey_signature_cb = sig_cb;
@@ -76,13 +125,18 @@ struct connection_options {
     this->user = std::move(user);
     this->password = std::move(password);
   }
-  void set_secure(bool secure) { this->secure = secure; }
+  void set_secure(bool s) { this->secure = s; }
   void load_ca_trusted_certificates(std::string file_name) { ca_trusted_certificates_file = std::move(file_name); }
+  void set_ca_certs_path(std::string path) { ca_certs_path = std::move(path); }
   void load_certificates_chain(std::string certs_file, std::string key_file) {
     certificates_chain_file = std::move(certs_file);
     private_key_file = std::move(key_file);
   }
   void set_skip_server_verification(bool skip) { skip_server_verification = skip; }
+  void set_expected_hostname(std::string hostname) { expected_hostname = std::move(hostname); }
+  void set_ciphers(std::string c) { ciphers = std::move(c); }
+  void set_cipher_suites(std::string c) { cipher_suites = std::move(c); }
+
   void set_closed_cb(std::function<void(natsConnection*)> cb) { closed_cb = std::move(cb); }
   void set_disconnected_cb(std::function<void(natsConnection*)> cb) { disconnected_cb = std::move(cb); }
   void set_reconnected_cb(std::function<void(natsConnection*)> cb) { reconnected_cb = std::move(cb); }
@@ -90,12 +144,36 @@ struct connection_options {
     error_handler = std::move(cb);
   }
   void set_lame_duck_mode_cb(std::function<void(natsConnection*)> cb) { lame_duck_mode_cb = std::move(cb); }
-  void set_reconnect_wait(std::chrono::milliseconds reconnect_wait) { this->reconnect_wait = reconnect_wait; }
-  void set_max_reconnect(int max_reconnect) { this->max_reconnect = max_reconnect; }
-  void set_ping_interval(std::chrono::milliseconds ping_interval) { this->ping_interval = ping_interval; }
-  void set_timeout(std::chrono::milliseconds timeout) { this->timeout = timeout; }
-  void set_name(std::string name) { this->name = std::move(name); }
-  void set_no_echo(bool no_echo) { this->no_echo = no_echo; }
+  void set_discovered_servers_cb(std::function<void(natsConnection*)> cb) { discovered_servers_cb = std::move(cb); }
+
+  void set_reconnect_wait(std::chrono::milliseconds rw) { this->reconnect_wait = rw; }
+  void set_max_reconnect(int mr) { this->max_reconnect = mr; }
+  void set_allow_reconnect(bool allow) { allow_reconnect = allow; }
+  void set_no_randomize(bool no_rand) { no_randomize = no_rand; }
+  void set_max_pings_out(int max) { max_pings_out = max; }
+  void set_reconnect_buf_size(int size) { reconnect_buf_size = size; }
+  void set_reconnect_jitter(int64_t jitter_ms, int64_t jitter_tls_ms = 0) {
+    reconnect_jitter = {jitter_ms, jitter_tls_ms};
+  }
+
+  void set_max_pending_msgs(int max) { max_pending_msgs = max; }
+  void set_max_pending_bytes(int64_t max) { max_pending_bytes = max; }
+  void set_io_buf_size(int size) { io_buf_size = size; }
+  void set_send_asap(bool val) { send_asap = val; }
+
+  void set_fail_requests_on_disconnect(bool val) { fail_requests_on_disconnect = val; }
+  void set_ignore_discovered_servers(bool val) { ignore_discovered_servers = val; }
+
+  void set_disable_no_responders(bool val) { disable_no_responders = val; }
+  void set_use_old_request_style(bool val) { use_old_request_style = val; }
+  void set_custom_inbox_prefix(std::string prefix) { custom_inbox_prefix = std::move(prefix); }
+  void set_pedantic(bool val) { pedantic = val; }
+  void set_verbose(bool val) { verbose = val; }
+
+  void set_ping_interval(std::chrono::milliseconds pi) { this->ping_interval = pi; }
+  void set_timeout(std::chrono::milliseconds t) { this->timeout = t; }
+  void set_name(std::string n) { this->name = std::move(n); }
+  void set_no_echo(bool ne) { this->no_echo = ne; }
 };
 
 /**
@@ -123,12 +201,22 @@ class connection {
   connection(connection&&) noexcept = default;
   connection& operator=(connection&&) noexcept = default;
 
+  /**
+   * @brief Quick connect to a single URL without building a connection_options.
+   */
+  [[nodiscard]] static connection connect_to(std::string_view url) {
+    connection nc;
+    connection_options opts;
+    opts.url = std::string(url);
+    nc.connect(opts);
+    return nc;
+  }
+
   void connect(const connection_options& options = {}) {
     natsConnection* raw{};
     natsOptions* nopts = nullptr;
     throw_on_error(natsOptions_Create(&nopts), "natsOptions_Create");
     std::unique_ptr<natsOptions, void (*)(natsOptions*)> holder(nopts, natsOptions_Destroy);
-    throw_on_error(natsOptions_SetURL(nopts, options.url.c_str()), "natsOptions_SetURL");
 
     // Build handlers on the heap so the pointer stored in nats.c remains valid after a move.
     auto handlers = std::make_shared<callback_handlers>();
@@ -137,6 +225,7 @@ class connection {
     handlers->reconnected_cb = options.reconnected_cb;
     handlers->error_handler = options.error_handler;
     handlers->lame_duck_mode_cb = options.lame_duck_mode_cb;
+    handlers->discovered_servers_cb = options.discovered_servers_cb;
 
     apply_nats_options(nopts, options, handlers.get());
     if (options.retry_on_failed_connect) {
@@ -148,6 +237,13 @@ class connection {
     // request_async (or any other code) holds conn_ beyond this object's lifetime.
     conn_.reset(raw, [h = handlers](natsConnection* p) { natsConnection_Destroy(p); });
     callback_handlers_ = std::move(handlers);
+  }
+
+  /**
+   * @brief Triggers a reconnect to the current server.
+   */
+  void reconnect() {
+    throw_on_error(natsConnection_Reconnect(conn_.get()), "natsConnection_Reconnect");
   }
 
   [[nodiscard]] bool connected() const noexcept { return conn_ != nullptr; }
@@ -534,6 +630,7 @@ class connection {
     std::function<void(natsConnection*)> reconnected_cb;
     std::function<void(natsConnection*, natsSubscription*, natsStatus)> error_handler;
     std::function<void(natsConnection*)> lame_duck_mode_cb;
+    std::function<void(natsConnection*)> discovered_servers_cb;
   };
 
   static void closed_cb_bridge(natsConnection* nc, void* closure) {
@@ -581,9 +678,34 @@ class connection {
     }
   }
 
+  static void discovered_servers_cb_bridge(natsConnection* nc, void* closure) {
+    auto* handlers = static_cast<callback_handlers*>(closure);
+    if (handlers->discovered_servers_cb) {
+      try { handlers->discovered_servers_cb(nc); } catch (...) {
+        std::fprintf(stderr, "[natscpp] exception in discovered servers callback, ignoring\n");
+      }
+    }
+  }
+
   static void apply_nats_options(natsOptions* nopts, const connection_options& options, callback_handlers* handlers) {
+    // URL setup: multi-server list takes precedence over single url.
+    if (!options.urls.empty()) {
+      std::vector<const char*> server_ptrs;
+      server_ptrs.reserve(options.urls.size());
+      for (const auto& u : options.urls) server_ptrs.push_back(u.c_str());
+      throw_on_error(::natsOptions_SetServers(nopts, server_ptrs.data(), static_cast<int>(server_ptrs.size())),
+                     "natsOptions_SetServers");
+    } else {
+      throw_on_error(::natsOptions_SetURL(nopts, options.url.c_str()), "natsOptions_SetURL");
+    }
+
+    // Authentication
     if (options.token) {
       throw_on_error(::natsOptions_SetToken(nopts, options.token->c_str()), "natsOptions_SetToken");
+    }
+    if (options.token_handler_cb) {
+      throw_on_error(::natsOptions_SetTokenHandler(nopts, options.token_handler_cb, options.token_handler_closure),
+                     "natsOptions_SetTokenHandler");
     }
     if (options.nkey_public) {
       throw_on_error(::natsOptions_SetNKey(nopts, options.nkey_public->c_str(), options.nkey_signature_cb,
@@ -599,12 +721,22 @@ class connection {
       throw_on_error(::natsOptions_SetUserInfo(nopts, options.user->c_str(), options.password->c_str()),
                      "natsOptions_SetUserInfo");
     }
+
+    // TLS
     if (options.secure) {
       throw_on_error(::natsOptions_SetSecure(nopts, *options.secure), "natsOptions_SetSecure");
     }
     if (options.ca_trusted_certificates_file) {
       throw_on_error(::natsOptions_LoadCATrustedCertificates(nopts, options.ca_trusted_certificates_file->c_str()),
                      "natsOptions_LoadCATrustedCertificates");
+    }
+    if (options.ca_certs_path) {
+#ifdef NATS_HAS_TLS
+      throw_on_error(::natsOptions_LoadCATrustedCertificatesPath(nopts, options.ca_certs_path->c_str()),
+                     "natsOptions_LoadCATrustedCertificatesPath");
+#else
+      throw nats_error(NATS_ILLEGAL_STATE, "natsOptions_LoadCATrustedCertificatesPath: TLS not compiled in");
+#endif
     }
     if (options.certificates_chain_file && options.private_key_file) {
       throw_on_error(::natsOptions_LoadCertificatesChain(nopts, options.certificates_chain_file->c_str(),
@@ -615,6 +747,23 @@ class connection {
       throw_on_error(::natsOptions_SkipServerVerification(nopts, *options.skip_server_verification),
                      "natsOptions_SkipServerVerification");
     }
+    if (options.expected_hostname) {
+      throw_on_error(::natsOptions_SetExpectedHostname(nopts, options.expected_hostname->c_str()),
+                     "natsOptions_SetExpectedHostname");
+    }
+    if (options.ciphers) {
+      throw_on_error(::natsOptions_SetCiphers(nopts, options.ciphers->c_str()), "natsOptions_SetCiphers");
+    }
+    if (options.cipher_suites) {
+#ifdef NATS_HAS_TLS
+      throw_on_error(::natsOptions_SetCipherSuites(nopts, options.cipher_suites->c_str()),
+                     "natsOptions_SetCipherSuites");
+#else
+      throw nats_error(NATS_ILLEGAL_STATE, "natsOptions_SetCipherSuites: TLS not compiled in");
+#endif
+    }
+
+    // Callbacks
     if (options.closed_cb) {
       throw_on_error(::natsOptions_SetClosedCB(nopts, &closed_cb_bridge, handlers), "natsOptions_SetClosedCB");
     }
@@ -634,6 +783,12 @@ class connection {
       throw_on_error(::natsOptions_SetLameDuckModeCB(nopts, &lame_duck_mode_cb_bridge, handlers),
                      "natsOptions_SetLameDuckModeCB");
     }
+    if (options.discovered_servers_cb) {
+      throw_on_error(::natsOptions_SetDiscoveredServersCB(nopts, &discovered_servers_cb_bridge, handlers),
+                     "natsOptions_SetDiscoveredServersCB");
+    }
+
+    // Reconnect behaviour
     if (options.reconnect_wait) {
       throw_on_error(::natsOptions_SetReconnectWait(nopts, options.reconnect_wait->count()),
                      "natsOptions_SetReconnectWait");
@@ -641,6 +796,75 @@ class connection {
     if (options.max_reconnect) {
       throw_on_error(::natsOptions_SetMaxReconnect(nopts, *options.max_reconnect), "natsOptions_SetMaxReconnect");
     }
+    if (options.allow_reconnect) {
+      throw_on_error(::natsOptions_SetAllowReconnect(nopts, *options.allow_reconnect),
+                     "natsOptions_SetAllowReconnect");
+    }
+    if (options.no_randomize) {
+      throw_on_error(::natsOptions_SetNoRandomize(nopts, *options.no_randomize), "natsOptions_SetNoRandomize");
+    }
+    if (options.max_pings_out) {
+      throw_on_error(::natsOptions_SetMaxPingsOut(nopts, *options.max_pings_out), "natsOptions_SetMaxPingsOut");
+    }
+    if (options.reconnect_buf_size) {
+      throw_on_error(::natsOptions_SetReconnectBufSize(nopts, *options.reconnect_buf_size),
+                     "natsOptions_SetReconnectBufSize");
+    }
+    if (options.reconnect_jitter) {
+      throw_on_error(::natsOptions_SetReconnectJitter(nopts, options.reconnect_jitter->first,
+                                                      options.reconnect_jitter->second),
+                     "natsOptions_SetReconnectJitter");
+    }
+
+    // Subscription back-pressure
+    if (options.max_pending_msgs) {
+      throw_on_error(::natsOptions_SetMaxPendingMsgs(nopts, *options.max_pending_msgs),
+                     "natsOptions_SetMaxPendingMsgs");
+    }
+    if (options.max_pending_bytes) {
+      throw_on_error(::natsOptions_SetMaxPendingBytes(nopts, *options.max_pending_bytes),
+                     "natsOptions_SetMaxPendingBytes");
+    }
+
+    // I/O tuning
+    if (options.io_buf_size) {
+      throw_on_error(::natsOptions_SetIOBufSize(nopts, *options.io_buf_size), "natsOptions_SetIOBufSize");
+    }
+    if (options.send_asap) {
+      throw_on_error(::natsOptions_SetSendAsap(nopts, *options.send_asap), "natsOptions_SetSendAsap");
+    }
+
+    // Cluster / server discovery
+    if (options.fail_requests_on_disconnect) {
+      throw_on_error(::natsOptions_SetFailRequestsOnDisconnect(nopts, *options.fail_requests_on_disconnect),
+                     "natsOptions_SetFailRequestsOnDisconnect");
+    }
+    if (options.ignore_discovered_servers) {
+      throw_on_error(::natsOptions_SetIgnoreDiscoveredServers(nopts, *options.ignore_discovered_servers),
+                     "natsOptions_SetIgnoreDiscoveredServers");
+    }
+
+    // Protocol tweaks
+    if (options.disable_no_responders) {
+      throw_on_error(::natsOptions_DisableNoResponders(nopts, *options.disable_no_responders),
+                     "natsOptions_DisableNoResponders");
+    }
+    if (options.use_old_request_style) {
+      throw_on_error(::natsOptions_UseOldRequestStyle(nopts, *options.use_old_request_style),
+                     "natsOptions_UseOldRequestStyle");
+    }
+    if (options.custom_inbox_prefix) {
+      throw_on_error(::natsOptions_SetCustomInboxPrefix(nopts, options.custom_inbox_prefix->c_str()),
+                     "natsOptions_SetCustomInboxPrefix");
+    }
+    if (options.pedantic) {
+      throw_on_error(::natsOptions_SetPedantic(nopts, *options.pedantic), "natsOptions_SetPedantic");
+    }
+    if (options.verbose) {
+      throw_on_error(::natsOptions_SetVerbose(nopts, *options.verbose), "natsOptions_SetVerbose");
+    }
+
+    // Connection tuning
     if (options.ping_interval) {
       throw_on_error(::natsOptions_SetPingInterval(nopts, options.ping_interval->count()),
                      "natsOptions_SetPingInterval");

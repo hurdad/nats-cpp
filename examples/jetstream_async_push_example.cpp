@@ -45,7 +45,7 @@ int main() {
     return consumer.next(std::chrono::seconds(2));
   });
 
-  js.publish(subject, "hello-jetstream-async-push");
+  (void)js.publish(subject, "hello-jetstream-async-push");
 
   auto msg = next_msg.get();
   std::cout << "jetstream async push received: " << msg.data() << '\n';

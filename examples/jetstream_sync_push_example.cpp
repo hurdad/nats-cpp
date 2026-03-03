@@ -39,7 +39,7 @@ int main() {
 
   auto consumer = js.push_subscribe(subject, durable);
 
-  js.publish(subject, "hello-jetstream-sync-push");
+  (void)js.publish(subject, "hello-jetstream-sync-push");
 
   auto msg = consumer.next(std::chrono::seconds(2));
   std::cout << "jetstream sync push received: " << msg.data() << '\n';

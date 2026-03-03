@@ -354,7 +354,7 @@ void test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_ava
     natscpp::js_publish_options opts;
     opts.msg_id = "msg-" + ts + "-" + std::to_string(i);
     opts.expected_stream = stream;
-    js.publish(subject, "payload-" + std::to_string(i), opts);
+    (void)js.publish(subject, "payload-" + std::to_string(i), opts);
   }
 
   auto pull_consumer = js.pull_subscribe(subject, pull_durable);
@@ -401,7 +401,7 @@ void test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_ava
   natscpp::subscription pull_sub(raw_pull_sub);
 
   for (int i = 8; i < 11; ++i) {
-    js.publish(subject, "payload-" + std::to_string(i));
+    (void)js.publish(subject, "payload-" + std::to_string(i));
   }
 
   (void)pull_sub.queued_messages();
