@@ -13,6 +13,7 @@
 #include <chrono>
 #include <future>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -318,6 +319,198 @@ void test_message_trace_carrier_reads_and_writes_headers() {
   assert(extracted["baggage"] == "k1=v1");
 }
 
+void test_header_default_state_release_and_reset() {
+  // Default-constructed header is not valid.
+  natscpp::header h;
+  assert(!h.valid());
+  assert(h.native_handle() == nullptr);
+  assert(h.release() == nullptr);
+
+  // release() transfers ownership; the wrapper becomes invalid.
+  auto h2 = natscpp::header::create();
+  assert(h2.valid());
+  natsHeader* raw = h2.release();
+  assert(raw != nullptr);
+  assert(!h2.valid());
+  ::natsHeader_Destroy(raw);
+
+  // reset() with no argument invalidates a live header.
+  auto h3 = natscpp::header::create();
+  assert(h3.valid());
+  h3.reset();
+  assert(!h3.valid());
+
+  // reset(raw) adopts an externally created header.
+  natsHeader* raw2 = nullptr;
+  assert(::natsHeader_New(&raw2) == NATS_OK);
+  h3.reset(raw2);
+  assert(h3.valid());
+}
+
+void test_jetstream_null_ctx_throws() {
+  natscpp::jetstream js;  // default-constructed, ctx_ == nullptr
+  assert(!js.valid());
+
+  auto expect_invalid = [](auto&& op) {
+    try {
+      op();
+      assert(false && "expected nats_error from null jetstream");
+    } catch (const natscpp::nats_error& ex) {
+      assert(ex.status() == NATS_INVALID_ARG);
+    }
+  };
+
+  expect_invalid([&] { (void)js.publish("s", "p"); });
+  expect_invalid([&] {
+    auto msg = natscpp::message::create("s", "", "p");
+    (void)js.publish_msg(std::move(msg));
+  });
+  expect_invalid([&] { (void)js.pull_subscribe("s", "d"); });
+  expect_invalid([&] { (void)js.push_subscribe("s", "d"); });
+  expect_invalid([&] {
+    (void)js.create_stream(natscpp::js_stream_config{.name = "S", .subjects = {"s"}});
+  });
+  expect_invalid([&] {
+    (void)js.update_stream(natscpp::js_stream_config{.name = "S", .subjects = {"s"}});
+  });
+  expect_invalid([&] { js.delete_stream("S"); });
+  expect_invalid([&] { js.purge_stream("S"); });
+  expect_invalid([&] { (void)js.get_stream_info("S"); });
+  expect_invalid([&] { (void)js.list_streams(); });
+  expect_invalid([&] { (void)js.list_stream_names(); });
+  expect_invalid([&] { (void)js.get_msg("S", 1); });
+  expect_invalid([&] { (void)js.get_last_msg("S", "s"); });
+  expect_invalid([&] { js.delete_msg("S", 1); });
+  expect_invalid([&] { js.erase_msg("S", 1); });
+  expect_invalid([&] { (void)js.get_consumer_group("S", "D"); });
+  expect_invalid([&] { js.delete_consumer_group("S", "D"); });
+  expect_invalid([&] { (void)js.list_consumer_groups("S"); });
+  expect_invalid([&] { (void)js.list_consumer_group_names("S"); });
+  expect_invalid([&] { (void)js.get_account_info(); });
+}
+
+void test_jetstream_consumer_config_validation_guards() {
+  // upsert_consumer_group validates stream/durable/push-deliver_subject
+  // before touching ctx_, so these fire even on a default-constructed jetstream.
+  natscpp::jetstream js;
+
+  auto expect_invalid_arg = [](auto&& op) {
+    try {
+      op();
+      assert(false && "expected std::invalid_argument");
+    } catch (const std::invalid_argument&) {
+      // expected
+    }
+  };
+
+  // Empty stream name.
+  expect_invalid_arg([&] {
+    (void)js.create_consumer_group(natscpp::js_consumer_config{.stream = "", .durable_name = "D"});
+  });
+  // Empty durable name.
+  expect_invalid_arg([&] {
+    (void)js.create_consumer_group(natscpp::js_consumer_config{.stream = "S", .durable_name = ""});
+  });
+  // Push consumer without a deliver_subject.
+  expect_invalid_arg([&] {
+    (void)js.create_consumer_group(natscpp::js_consumer_config{
+        .stream = "S",
+        .durable_name = "D",
+        .type = natscpp::js_consumer_type::push,
+        // deliver_subject intentionally left empty
+    });
+  });
+  // Same guards apply to update_consumer_group.
+  expect_invalid_arg([&] {
+    (void)js.update_consumer_group(natscpp::js_consumer_config{.stream = "", .durable_name = "D"});
+  });
+  expect_invalid_arg([&] {
+    (void)js.update_consumer_group(natscpp::js_consumer_config{.stream = "S", .durable_name = ""});
+  });
+}
+
+void test_js_pull_consumer_null_guard() {
+  natscpp::js_pull_consumer consumer;
+  assert(!consumer.valid());
+  try {
+    (void)consumer.next(std::chrono::milliseconds(1));
+    assert(false && "expected nats_error from null js_pull_consumer");
+  } catch (const natscpp::nats_error& ex) {
+    assert(ex.status() == NATS_INVALID_ARG);
+  }
+}
+
+void test_js_push_consumer_null_guard() {
+  natscpp::js_push_consumer consumer;
+  assert(!consumer.valid());
+  try {
+    (void)consumer.next(std::chrono::milliseconds(1));
+    assert(false && "expected nats_error from null js_push_consumer");
+  } catch (const natscpp::nats_error& ex) {
+    assert(ex.status() == NATS_INVALID_ARG);
+  }
+}
+
+void test_kv_entry_null_guards() {
+  natscpp::kv_entry e;
+  assert(!e.valid());
+  assert(e.key().empty());
+  assert(e.value().empty());
+  assert(e.bucket().empty());
+  assert(e.revision() == 0);
+  assert(e.created() == 0);
+  assert(e.delta() == 0);
+  assert(e.operation() == kvOp_Put);  // default sentinel when null
+}
+
+void test_kv_watcher_null_guards() {
+  natscpp::kv_watcher w;
+  assert(!w.valid());
+
+  auto expect_invalid = [](auto&& op) {
+    try {
+      op();
+      assert(false && "expected nats_error from null kv_watcher");
+    } catch (const natscpp::nats_error& ex) {
+      assert(ex.status() == NATS_INVALID_ARG);
+    }
+  };
+
+  expect_invalid([&] { (void)w.next(); });
+  expect_invalid([&] { w.stop(); });
+}
+
+void test_key_value_null_guards() {
+  natscpp::key_value kv;
+  assert(!kv.valid());
+
+  auto expect_invalid = [](auto&& op) {
+    try {
+      op();
+      assert(false && "expected nats_error from null key_value");
+    } catch (const natscpp::nats_error& ex) {
+      assert(ex.status() == NATS_INVALID_ARG);
+    }
+  };
+
+  expect_invalid([&] { (void)kv.watch("k"); });
+  expect_invalid([&] { (void)kv.watch_multi({"k"}); });
+  expect_invalid([&] { (void)kv.watch_all(); });
+  expect_invalid([&] { (void)kv.get("k"); });
+  expect_invalid([&] { (void)kv.put("k", "v"); });
+  expect_invalid([&] { (void)kv.create("k", "v"); });
+  expect_invalid([&] { (void)kv.update("k", "v", 1); });
+  expect_invalid([&] { (void)kv.get_revision("k", 1); });
+  expect_invalid([&] { kv.erase("k"); });
+  expect_invalid([&] { kv.purge("k"); });
+  expect_invalid([&] { (void)kv.keys(); });
+  expect_invalid([&] { (void)kv.keys_with_filters({"*"}); });
+  expect_invalid([&] { (void)kv.history("k"); });
+  expect_invalid([&] { kv.purge_deletes(); });
+  expect_invalid([&] { (void)kv.bucket(); });
+  expect_invalid([&] { (void)kv.status(); });
+}
+
 }  // namespace
 
 namespace unit_tests {
@@ -339,6 +532,14 @@ void run_core_unit_tests() {
   test_new_inbox_generates_unique_subjects();
   test_trace_carrier_concept_and_helpers();
   test_message_trace_carrier_reads_and_writes_headers();
+  test_header_default_state_release_and_reset();
+  test_jetstream_null_ctx_throws();
+  test_jetstream_consumer_config_validation_guards();
+  test_js_pull_consumer_null_guard();
+  test_js_push_consumer_null_guard();
+  test_kv_entry_null_guards();
+  test_kv_watcher_null_guards();
+  test_key_value_null_guards();
 }
 
 }  // namespace unit_tests

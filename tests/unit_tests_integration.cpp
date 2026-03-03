@@ -1,5 +1,6 @@
 #include "unit_tests.hpp"
 
+#include <natscpp/awaitable.hpp>
 #include <natscpp/connection.hpp>
 #include <natscpp/jetstream.hpp>
 #include <natscpp/kv.hpp>
@@ -13,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -496,6 +498,409 @@ void test_connection_sync_and_async_roundtrip_if_server_available() {
   responder.unsubscribe();
 }
 
+void test_publish_message_overload_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping publish(message) overload checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.test.pubmsg." + ts;
+
+  auto sub = nc.subscribe_sync(subj);
+  auto msg = natscpp::message::create(subj, "", "msg-object-payload");
+  msg.set_header("x-custom", "header-value");
+  nc.publish(std::move(msg));
+  nc.flush();
+  auto received = sub.next_message(std::chrono::seconds(2));
+  assert(received.data() == "msg-object-payload");
+  sub.unsubscribe();
+}
+
+void test_subscribe_async_timeout_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping subscribe_async_timeout checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.test.astimeout." + ts;
+
+  // Normal delivery through the timeout-subscription variant.
+  std::promise<std::string> received;
+  auto sub = nc.subscribe_async_timeout(subj, std::chrono::seconds(10), [&received](natscpp::message msg) {
+    try {
+      received.set_value(std::string(msg.data()));
+    } catch (...) {
+    }
+  });
+  nc.publish(subj, "timeout-sub-msg");
+  assert(received.get_future().get() == "timeout-sub-msg");
+  sub.unsubscribe();
+}
+
+void test_subscribe_queue_sync_and_queue_async_timeout_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping subscribe_queue_sync/queue_async_timeout checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+
+  // subscribe_queue_sync: synchronous queue subscription receives a message.
+  {
+    const std::string subj = "natscpp.test.qsync." + ts;
+    auto sub = nc.subscribe_queue_sync(subj, "workers");
+    nc.publish(subj, "queue-sync-msg");
+    nc.flush();
+    auto msg = sub.next_message(std::chrono::seconds(2));
+    assert(msg.data() == "queue-sync-msg");
+    sub.unsubscribe();
+  }
+
+  // subscribe_queue_async_timeout: async queue subscription with a generous timeout delivers messages.
+  {
+    const std::string subj = "natscpp.test.qatimeout." + ts;
+    std::promise<std::string> received;
+    auto sub = nc.subscribe_queue_async_timeout(subj, "workers", std::chrono::seconds(10),
+                                                [&received](natscpp::message msg) {
+                                                  try {
+                                                    received.set_value(std::string(msg.data()));
+                                                  } catch (...) {
+                                                  }
+                                                });
+    nc.publish(subj, "queue-timeout-msg");
+    assert(received.get_future().get() == "queue-timeout-msg");
+    sub.unsubscribe();
+  }
+}
+
+void test_subscription_on_complete_callback_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping on_complete_callback checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.test.complete." + ts;
+
+  // Test 1: callback fires after drain completes.
+  {
+    std::promise<void> done;
+    auto sub = nc.subscribe_async(subj, [](natscpp::message) {});
+    sub.set_on_complete_callback([&done] {
+      try {
+        done.set_value();
+      } catch (...) {
+      }
+    });
+    sub.drain(std::chrono::milliseconds(500));
+    sub.wait_for_drain_completion(std::chrono::milliseconds(500));
+    assert(done.get_future().wait_for(std::chrono::milliseconds(500)) == std::future_status::ready);
+  }
+
+  // Test 2: calling set_on_complete_callback twice prunes the first; only the second fires.
+  {
+    int count = 0;
+    std::promise<void> done;
+    auto sub = nc.subscribe_async(subj, [](natscpp::message) {});
+    sub.set_on_complete_callback([&count] { count += 100; });  // first — should be replaced
+    sub.set_on_complete_callback([&count, &done] {              // second — should fire
+      count += 1;
+      try {
+        done.set_value();
+      } catch (...) {
+      }
+    });
+    sub.drain(std::chrono::milliseconds(500));
+    sub.wait_for_drain_completion(std::chrono::milliseconds(500));
+    done.get_future().wait_for(std::chrono::milliseconds(500));
+    assert(count == 1);
+  }
+}
+
+void test_request_awaitable_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping request_awaitable checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.test.awaitable." + ts;
+
+  auto responder = nc.subscribe_async(subj, [&nc](natscpp::message msg) {
+    if (!msg.reply_to().empty()) {
+      nc.publish(std::string(msg.reply_to()), msg.data());
+    }
+  });
+  nc.flush();
+
+  // await_resume() blocks until the underlying future resolves — usable without a coroutine frame.
+  auto awaitable = nc.request_awaitable(subj, "awaitable-payload", std::chrono::seconds(2));
+  auto reply = awaitable.await_resume();
+  assert(reply.data() == "awaitable-payload");
+
+  // await_ready() returns true once the future is resolved.
+  auto awaitable2 = nc.request_awaitable(subj, "payload2", std::chrono::seconds(2));
+  // Give the async request time to complete before polling await_ready().
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  assert(awaitable2.await_ready());
+  auto reply2 = awaitable2.await_resume();
+  assert(reply2.data() == "payload2");
+
+  responder.unsubscribe();
+}
+
+void test_key_value_open_constructor_and_full_config_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping kv open constructor/full config checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string bucket = "NATSCPP_KV3_" + ts;
+
+  // Full kv_config overload.
+  natscpp::kv_config cfg;
+  cfg.bucket = bucket;
+  cfg.history = 3;
+  cfg.description = "test bucket";
+  auto kv = natscpp::key_value::create(nc, cfg);
+  assert(kv.valid());
+  assert(kv.bucket() == bucket);
+  (void)kv.put("open-key", "open-val");
+
+  // key_value(conn, bucket) constructor opens an existing bucket.
+  natscpp::key_value kv2(nc, bucket);
+  assert(kv2.valid());
+  assert(kv2.bucket() == bucket);
+  auto entry = kv2.get("open-key");
+  assert(entry.value() == "open-val");
+
+  natscpp::key_value::delete_bucket(nc, bucket);
+}
+
+void test_key_value_keys_with_filters_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping kv keys_with_filters checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string bucket = "NATSCPP_KV4_" + ts;
+
+  auto kv = natscpp::key_value::create(nc, bucket, 1);
+  (void)kv.put("pref.a", "v1");
+  (void)kv.put("pref.b", "v2");
+  (void)kv.put("other.c", "v3");
+
+  auto filtered = kv.keys_with_filters({"pref.*"});
+  assert(filtered.size() == 2);
+  for (const auto& k : filtered) {
+    assert(k.rfind("pref.", 0) == 0);
+  }
+
+  auto all = kv.keys_with_filters({">"});
+  assert(all.size() == 3);
+
+  natscpp::key_value::delete_bucket(nc, bucket);
+}
+
+void test_key_value_history_and_purge_deletes_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping kv history/purge_deletes checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string bucket = "NATSCPP_KV5_" + ts;
+  auto kv = natscpp::key_value::create(nc, bucket, 5);
+
+  (void)kv.put("hist-key", "v1");
+  (void)kv.put("hist-key", "v2");
+  (void)kv.put("hist-key", "v3");
+
+  auto hist = kv.history("hist-key");
+  assert(hist.size() == 3);
+  for (const auto& e : hist) {
+    assert(e.key() == "hist-key");
+    assert(e.bucket() == bucket);
+    assert(!e.value().empty());
+  }
+  // All three values must appear somewhere in the history (order is implementation-defined).
+  std::vector<std::string> values;
+  for (const auto& e : hist) values.push_back(e.value());
+  assert(std::find(values.begin(), values.end(), "v1") != values.end());
+  assert(std::find(values.begin(), values.end(), "v2") != values.end());
+  assert(std::find(values.begin(), values.end(), "v3") != values.end());
+
+  // purge_deletes: erase a key then strip its tombstone — must not throw.
+  (void)kv.put("ephemeral", "temp");
+  kv.erase("ephemeral");
+  kv.purge_deletes();
+
+  natscpp::key_value::delete_bucket(nc, bucket);
+}
+
+void test_jetstream_stream_management_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping jetstream stream management checks (NATS server unavailable)\n";
+    return;
+  }
+
+  natscpp::jetstream js(nc);
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string stream = "NATSCPP_SM_" + ts;
+  const std::string subject = "natscpp.sm." + ts + ".>";
+  const std::string subject2 = "natscpp.sm2." + ts + ".>";
+
+  auto created = js.create_stream(natscpp::js_stream_config{.name = stream, .subjects = {subject}});
+  assert(created.name == stream);
+
+  // get_stream_info
+  auto info = js.get_stream_info(stream);
+  assert(info.name == stream);
+
+  // list_streams / list_stream_names
+  auto all_streams = js.list_streams();
+  assert(!all_streams.empty());
+  assert(std::any_of(all_streams.begin(), all_streams.end(),
+                     [&stream](const natscpp::stream_info& s) { return s.name == stream; }));
+
+  auto all_names = js.list_stream_names();
+  assert(!all_names.empty());
+  assert(std::find(all_names.begin(), all_names.end(), stream) != all_names.end());
+
+  // update_stream: add a second subject.
+  auto updated = js.update_stream(natscpp::js_stream_config{.name = stream, .subjects = {subject, subject2}});
+  assert(updated.name == stream);
+
+  // Empty-name guards on a valid context throw std::invalid_argument.
+  try {
+    js.delete_stream("");
+    assert(false && "expected std::invalid_argument");
+  } catch (const std::invalid_argument&) {
+  }
+  try {
+    (void)js.get_stream_info("");
+    assert(false && "expected std::invalid_argument");
+  } catch (const std::invalid_argument&) {
+  }
+
+  // purge_stream empties the stream without removing it.
+  js.purge_stream(stream);
+  auto after_purge = js.get_stream_info(stream);
+  assert(after_purge.messages == 0);
+
+  // delete_stream removes the stream entirely.
+  js.delete_stream(stream);
+  try {
+    (void)js.get_stream_info(stream);
+    assert(false && "expected error after stream deletion");
+  } catch (const natscpp::nats_error& ex) {
+    assert(ex.status() != NATS_OK);
+  }
+}
+
+void test_jetstream_stream_msg_access_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping jetstream stream msg access checks (NATS server unavailable)\n";
+    return;
+  }
+
+  natscpp::jetstream js(nc);
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string stream = "NATSCPP_MA_" + ts;
+  const std::string subject = "natscpp.ma." + ts;
+
+  (void)js.create_stream(natscpp::js_stream_config{.name = stream, .subjects = {subject}});
+  (void)js.publish(subject, "msg-1");
+  (void)js.publish(subject, "msg-2");
+  (void)js.publish(subject, "msg-3");
+
+  // get_msg by sequence number.
+  auto m1 = js.get_msg(stream, 1);
+  assert(m1.data() == "msg-1");
+
+  // get_last_msg returns the most recently published message on the subject.
+  auto last = js.get_last_msg(stream, subject);
+  assert(last.data() == "msg-3");
+
+  // delete_msg removes the message; a subsequent get_msg should fail.
+  js.delete_msg(stream, 1);
+  try {
+    (void)js.get_msg(stream, 1);
+    assert(false && "expected error after delete_msg");
+  } catch (const natscpp::nats_error& ex) {
+    assert(ex.status() != NATS_OK);
+  }
+
+  // erase_msg securely overwrites the message data.
+  js.erase_msg(stream, 2);
+
+  js.delete_stream(stream);
+}
+
+void test_jetstream_publish_msg_and_account_info_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping jetstream publish_msg/account_info checks (NATS server unavailable)\n";
+    return;
+  }
+
+  natscpp::jetstream js(nc);
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string stream = "NATSCPP_PM_" + ts;
+  const std::string subject = "natscpp.pm." + ts;
+
+  (void)js.create_stream(natscpp::js_stream_config{.name = stream, .subjects = {subject}});
+
+  // publish_msg: publish a pre-built message object carrying custom headers.
+  auto msg = natscpp::message::create(subject, "", "msg-with-header");
+  msg.set_header("x-trace-id", "abc123");
+  auto ack = js.publish_msg(std::move(msg));
+  assert(!ack.stream.empty());
+  assert(ack.sequence >= 1);
+
+  // get_account_info returns non-negative stream/consumer counts.
+  auto acct = js.get_account_info();
+  assert(acct.streams >= 1);
+
+  js.delete_stream(stream);
+}
+
 }  // namespace
 
 namespace unit_tests {
@@ -511,6 +916,17 @@ void run_integration_tests() {
   test_kv_put_erase_and_entry_fields_if_server_available();
   test_kv_watchers_if_server_available();
   test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_available();
+  test_publish_message_overload_if_server_available();
+  test_subscribe_async_timeout_if_server_available();
+  test_subscribe_queue_sync_and_queue_async_timeout_if_server_available();
+  test_subscription_on_complete_callback_if_server_available();
+  test_request_awaitable_if_server_available();
+  test_key_value_open_constructor_and_full_config_if_server_available();
+  test_key_value_keys_with_filters_if_server_available();
+  test_key_value_history_and_purge_deletes_if_server_available();
+  test_jetstream_stream_management_if_server_available();
+  test_jetstream_stream_msg_access_if_server_available();
+  test_jetstream_publish_msg_and_account_info_if_server_available();
 }
 
 }  // namespace unit_tests
