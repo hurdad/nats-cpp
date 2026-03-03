@@ -86,6 +86,8 @@ When `NATSCPP_BUILD_EXAMPLES=ON` (default), the following example targets are bu
 - `natscpp_sync_example`
 - `natscpp_async_example`
 - `natscpp_request_reply_example`
+- `natscpp_request_reply_server_example`
+- `natscpp_request_reply_client_example`
 - `natscpp_jetstream_sync_pull_example`
 - `natscpp_jetstream_sync_push_example`
 - `natscpp_jetstream_async_pull_example`
@@ -146,6 +148,8 @@ int main() {
 
 Request/reply example is available in:
 - `examples/request_reply_example.cpp`
+- `examples/request_reply_server_example.cpp`
+- `examples/request_reply_client_example.cpp`
 
 ## JetStream
 
