@@ -82,9 +82,15 @@ class js_pull_consumer {
   [[nodiscard]] bool valid() const noexcept { return sub_ != nullptr; }
 
   [[nodiscard]] message next(std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
-    natsMsg* msg{};
-    throw_on_error(natsSubscription_NextMsg(&msg, sub_, static_cast<int64_t>(timeout.count())),
-                   "natsSubscription_NextMsg");
+    natsMsgList list{};
+    throw_on_error(natsSubscription_Fetch(&list, sub_, 1, static_cast<int64_t>(timeout.count()), nullptr),
+                   "natsSubscription_Fetch");
+    struct list_guard { natsMsgList& l; ~list_guard() { natsMsgList_Destroy(&l); } } guard{list};
+    if (list.Count < 1 || list.Msgs == nullptr) {
+      throw nats_error(NATS_TIMEOUT, "natsSubscription_Fetch returned no messages");
+    }
+    natsMsg* msg = list.Msgs[0];
+    list.Msgs[0] = nullptr;
     return message{msg};
   }
 

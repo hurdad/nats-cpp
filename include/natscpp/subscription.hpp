@@ -255,10 +255,11 @@ class subscription {
 
   [[nodiscard]] std::optional<consumer_sequence_mismatch> get_sequence_mismatch() const {
     jsConsumerSequenceMismatch mismatch{};
-    throw_on_error(natsSubscription_GetSequenceMismatch(&mismatch, sub_.get()), "natsSubscription_GetSequenceMismatch");
-    if (!mismatch.ConsumerClient && !mismatch.Stream && !mismatch.ConsumerServer) {
+    natsStatus s = natsSubscription_GetSequenceMismatch(&mismatch, sub_.get());
+    if (s == NATS_NOT_FOUND) {
       return std::nullopt;
     }
+    throw_on_error(s, "natsSubscription_GetSequenceMismatch");
     return consumer_sequence_mismatch{mismatch.Stream, mismatch.ConsumerClient, mismatch.ConsumerServer};
   }
 

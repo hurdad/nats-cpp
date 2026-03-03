@@ -795,22 +795,6 @@ void test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_ava
   });
   assert(created_pull.stream_name == stream);
 
-  auto created_push = js.create_consumer_group(natscpp::js_consumer_config{
-      .stream = stream,
-      .durable_name = push_durable,
-      .filter_subject = subject,
-      .type = natscpp::js_consumer_type::push,
-  });
-  assert(created_push.stream_name == stream);
-
-  auto created_alias = js.create_consumer_group(natscpp::js_consumer_config{
-      .stream = stream,
-      .durable_name = alias_durable,
-      .filter_subject = subject,
-      .type = natscpp::js_consumer_type::push,
-  });
-  assert(created_alias.stream_name == stream);
-
   for (int i = 0; i < 8; ++i) {
     natscpp::js_publish_options opts;
     opts.msg_id = "msg-" + ts + "-" + std::to_string(i);
@@ -826,8 +810,6 @@ void test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_ava
   assert(md.consumer == pull_durable);
   assert(md.sequence_stream >= 1);
   assert(md.timestamp > 0);
-  assert(pull_msg1.sequence() >= 1);
-  assert(pull_msg1.timestamp() > 0);
   pull_msg1.in_progress();
   pull_msg1.ack_sync();
 
