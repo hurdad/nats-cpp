@@ -33,6 +33,7 @@ if(EXISTS "${NATS_C_SOURCE_DIR}/CMakeLists.txt")
 
   add_subdirectory("${NATS_C_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/third_party/nats.c")
   target_link_libraries(natscpp INTERFACE nats_static)
+  set_target_properties(nats_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_include_directories(natscpp
     INTERFACE
       $<BUILD_INTERFACE:${NATS_C_SOURCE_DIR}/src>)
