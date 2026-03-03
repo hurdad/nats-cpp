@@ -34,7 +34,7 @@ int main() {
       .stream = "DEMO_JS_ASYNC_PUSH",
       .durable_name = durable,
       .filter_subject = subject,
-      .deliver_subject = "demo.js.async.push.delivery",
+      .deliver_subject = "deliver.js.async.push",
       .type = natscpp::js_consumer_type::push,
   });
 

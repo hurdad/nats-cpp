@@ -33,7 +33,7 @@ int main() {
       .stream = "DEMO_JS_SYNC_PUSH",
       .durable_name = durable,
       .filter_subject = subject,
-      .deliver_subject = "demo.js.sync.push.delivery",
+      .deliver_subject = "deliver.js.sync.push",
       .type = natscpp::js_consumer_type::push,
   });
 
