@@ -393,13 +393,14 @@ void test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_ava
   alias_msg.ack();
 
   jsCtx* raw_ctx = nullptr;
-  assert(natsConnection_JetStream(&raw_ctx, nc.native_handle(), nullptr) == NATS_OK);
+  natscpp::throw_on_error(natsConnection_JetStream(&raw_ctx, nc.native_handle(), nullptr), "natsConnection_JetStream");
   std::unique_ptr<jsCtx, void (*)(jsCtx*)> ctx_holder(raw_ctx, jsCtx_Destroy);
 
   natsSubscription* raw_pull_sub = nullptr;
   const std::string helper_durable = "helper" + ts;
-  assert(js_PullSubscribe(&raw_pull_sub, raw_ctx, subject.c_str(), helper_durable.c_str(), nullptr, nullptr, nullptr) ==
-         NATS_OK);
+  natscpp::throw_on_error(
+      js_PullSubscribe(&raw_pull_sub, raw_ctx, subject.c_str(), helper_durable.c_str(), nullptr, nullptr, nullptr),
+      "js_PullSubscribe");
   natscpp::subscription pull_sub(raw_pull_sub);
 
   for (int i = 8; i < 11; ++i) {
