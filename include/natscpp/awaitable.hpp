@@ -33,8 +33,12 @@ class future_awaitable {
       : state_(std::make_shared<shared_state>(std::move(fut))) {}
 
   ~future_awaitable() {
-    // Signal the worker thread (if any) that the awaitable is gone.
-    state_->alive.store(false, std::memory_order_release);
+    // Race to claim cancellation.  The thread uses a CAS to atomically flip
+    // alive true→false; the destructor uses exchange for the same effect.
+    // Whichever wins sets alive=false first; the other side is a no-op.
+    // If the thread won (already called h.resume()), the coroutine owns the
+    // frame and destroying the awaitable from within it is safe.
+    state_->alive.exchange(false, std::memory_order_acq_rel);
   }
 
   [[nodiscard]] bool await_ready() const {
@@ -44,7 +48,11 @@ class future_awaitable {
   void await_suspend(std::coroutine_handle<> h) {
     std::thread([s = state_, h]() mutable {
       s->fut.wait();
-      if (s->alive.load(std::memory_order_acquire)) {
+      // Atomically claim the right to resume: only one of (thread, destructor)
+      // can flip alive from true to false.  If we win, the awaitable is still
+      // alive and h is valid; if we lose, the coroutine was destroyed first.
+      bool expected = true;
+      if (s->alive.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
         h.resume();
       }
     }).detach();

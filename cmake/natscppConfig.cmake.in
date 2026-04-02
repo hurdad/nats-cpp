@@ -1,5 +1,18 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+
+# nats_static / nats (shared) both depend on pthreads.
+find_dependency(Threads REQUIRED)
+
+# natscpp links against a cnats target (cnats::nats_static for the bundled
+# build, cnats::nats for a system shared-library build).  Check the co-install
+# location first (bundled case) then fall back to the normal cmake search path
+# (system case where the user points CMAKE_PREFIX_PATH at the nats.c prefix).
+find_dependency(cnats REQUIRED
+  HINTS "${PACKAGE_PREFIX_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/cnats"
+        "${CMAKE_CURRENT_LIST_DIR}/../cnats")
+
 include("${CMAKE_CURRENT_LIST_DIR}/natscppTargets.cmake")
 
 check_required_components(natscpp)

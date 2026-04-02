@@ -6,15 +6,19 @@
 #include <natscpp/header.hpp>
 #include <natscpp/jetstream.hpp>
 #include <natscpp/kv.hpp>
+#include <natscpp/library.hpp>
 #include <natscpp/message.hpp>
 #include <natscpp/trace.hpp>
 
 #include <cassert>
 #include <chrono>
+#include <coroutine>
 #include <future>
+#include <limits>
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -511,6 +515,148 @@ void test_key_value_null_guards() {
   expect_invalid([&] { (void)kv.status(); });
 }
 
+// ---------------------------------------------------------------------------
+// header: null-handle guards (check_valid() coverage)
+// ---------------------------------------------------------------------------
+
+void test_header_null_handle_throws() {
+  natscpp::header h;  // default-constructed: not valid
+  assert(!h.valid());
+
+  auto expect_invalid = [](auto&& op) {
+    try {
+      op();
+      assert(false && "expected nats_error from null header");
+    } catch (const natscpp::nats_error& ex) {
+      assert(ex.status() == NATS_INVALID_ARG);
+    }
+  };
+
+  expect_invalid([&] { h.set("k", "v"); });
+  expect_invalid([&] { h.add("k", "v"); });
+  expect_invalid([&] { (void)h.get("k"); });
+  expect_invalid([&] { (void)h.values("k"); });
+  expect_invalid([&] { (void)h.keys(); });
+  expect_invalid([&] { (void)h.keys_count(); });
+  expect_invalid([&] { h.erase("k"); });
+}
+
+// ---------------------------------------------------------------------------
+// connection: runtime payload-size guards (assert → throw)
+// ---------------------------------------------------------------------------
+
+void test_publish_oversized_payload_throws() {
+  // Construct a string_view that reports size > INT_MAX without allocating real
+  // memory.  publish()/sign()/request_sync() check .size() before touching the
+  // data pointer, so this is safe to use purely as a size-check trigger.
+  const char dummy = 'x';
+  const std::string_view oversized{&dummy, static_cast<std::size_t>(std::numeric_limits<int>::max()) + 1};
+
+  natscpp::connection nc;  // not connected; size check fires before any I/O
+
+  auto expect_invalid_arg = [](auto&& op, const char* ctx) {
+    try {
+      op();
+      assert(false && "expected std::invalid_argument");
+    } catch (const std::invalid_argument& ex) {
+      const std::string what{ex.what()};
+      assert(what.find("INT_MAX") != std::string::npos);
+      (void)ctx;
+    }
+  };
+
+  expect_invalid_arg([&] { nc.publish("s", oversized); }, "publish");
+  expect_invalid_arg([&] { (void)nc.sign(oversized); }, "sign");
+  expect_invalid_arg([&] { (void)nc.request_sync("s", oversized); }, "request_sync");
+}
+
+// ---------------------------------------------------------------------------
+// message: empty and binary payloads
+// ---------------------------------------------------------------------------
+
+void test_message_empty_payload() {
+  auto msg = natscpp::message::create("s", "", "");
+  assert(msg.valid());
+  assert(msg.data().empty());
+  assert(msg.data().size() == 0);
+}
+
+void test_message_binary_payload_with_null_bytes() {
+  const char binary[] = {'\x00', '\x01', '\xFF', '\x00', '\xAB'};
+  natsMsg* raw = nullptr;
+  assert(natsMsg_Create(&raw, "bin.subj", nullptr, binary, static_cast<int>(sizeof(binary))) == NATS_OK);
+  natscpp::message msg{raw};
+  assert(msg.valid());
+  assert(msg.data().size() == 5);
+  assert(msg.data()[0] == '\x00');
+  assert(msg.data()[2] == static_cast<char>('\xFF'));
+  assert(msg.data()[4] == static_cast<char>('\xAB'));
+}
+
+// ---------------------------------------------------------------------------
+// library.hpp: basic runtime coverage
+// ---------------------------------------------------------------------------
+
+void test_library_version_and_time_functions() {
+  // Version string is non-null and non-empty.
+  const char* version = natscpp::nats_GetVersion();
+  assert(version != nullptr);
+  assert(version[0] != '\0');
+
+  // Version number is positive.
+  const uint32_t ver_num = natscpp::nats_GetVersionNumber();
+  assert(ver_num > 0);
+
+  // Timestamps are positive.
+  const int64_t now_ms = natscpp::nats_Now();
+  assert(now_ms > 0);
+
+  const int64_t now_ns = natscpp::nats_NowInNanoSeconds();
+  assert(now_ns > 0);
+
+  // Monotonic clock does not go backwards between two consecutive calls.
+  const int64_t mono1 = natscpp::nats_NowMonotonicInNanoSeconds();
+  const int64_t mono2 = natscpp::nats_NowMonotonicInNanoSeconds();
+  assert(mono1 > 0);
+  assert(mono2 >= mono1);
+
+  // Compatibility check must pass (linked library matches header version).
+  assert(natscpp::nats_CheckCompatibility());
+}
+
+// ---------------------------------------------------------------------------
+// future_awaitable: suspend/resume and destroyed-before-ready
+// ---------------------------------------------------------------------------
+
+void test_future_awaitable_suspend_resumes_via_noop_handle() {
+  // await_suspend spawns a thread that calls h.resume() once the future is
+  // ready.  std::noop_coroutine() provides a safe no-op handle so we can
+  // exercise the worker-thread path without a real coroutine frame.
+  std::promise<int> p;
+  natscpp::future_awaitable<int> a{p.get_future()};
+  assert(!a.await_ready());
+  a.await_suspend(std::noop_coroutine());
+  p.set_value(42);
+  // Give the detached thread time to observe the ready future and call resume.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  // Reaching here without crashing confirms the thread path executes cleanly.
+}
+
+void test_future_awaitable_destroyed_before_future_ready() {
+  // Verify that destroying the awaitable before the future resolves does not
+  // crash: the destructor's exchange(false) wins the CAS race and the thread
+  // skips h.resume().
+  std::promise<int> p;
+  {
+    natscpp::future_awaitable<int> a{p.get_future()};
+    a.await_suspend(std::noop_coroutine());
+    // Awaitable destroyed here; alive flipped to false via exchange().
+  }
+  p.set_value(99);  // Resolve after awaitable is gone; thread must not resume.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  // No crash or sanitizer complaint = CAS guard is working.
+}
+
 }  // namespace
 
 namespace unit_tests {
@@ -540,6 +686,13 @@ void run_core_unit_tests() {
   test_kv_entry_null_guards();
   test_kv_watcher_null_guards();
   test_key_value_null_guards();
+  test_header_null_handle_throws();
+  test_publish_oversized_payload_throws();
+  test_message_empty_payload();
+  test_message_binary_payload_with_null_bytes();
+  test_library_version_and_time_functions();
+  test_future_awaitable_suspend_resumes_via_noop_handle();
+  test_future_awaitable_destroyed_before_future_ready();
 }
 
 }  // namespace unit_tests

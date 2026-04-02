@@ -2,7 +2,6 @@
 
 #include <nats/nats.h>
 
-#include <cassert>
 #include <chrono>
 #include <array>
 #include <cstdio>
@@ -10,6 +9,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <cstdlib>
 #include <mutex>
 #include <optional>
@@ -264,8 +264,8 @@ class connection {
   }
 
   void publish(std::string_view subject, std::string_view payload) {
-    assert(payload.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
-           "publish: payload exceeds INT_MAX bytes");
+    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      throw std::invalid_argument("publish: payload exceeds INT_MAX bytes");
     throw_on_error(natsConnection_Publish(conn_.get(), std::string(subject).c_str(), payload.data(),
                                           static_cast<int>(payload.size())),
                    "natsConnection_Publish");
@@ -277,6 +277,8 @@ class connection {
   }
 
   void publish_request(std::string_view subject, std::string_view reply_to, std::string_view payload) {
+    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      throw std::invalid_argument("publish_request: payload exceeds INT_MAX bytes");
     throw_on_error(natsConnection_PublishRequest(conn_.get(), std::string(subject).c_str(), std::string(reply_to).c_str(),
                                                  payload.data(), static_cast<int>(payload.size())),
                    "natsConnection_PublishRequest");
@@ -303,8 +305,8 @@ class connection {
   void flush() { throw_on_error(natsConnection_Flush(conn_.get()), "natsConnection_Flush"); }
   void close() { natsConnection_Close(conn_.get()); }
   [[nodiscard]] std::array<unsigned char, 64> sign(std::string_view message) {
-    assert(message.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
-           "sign: message exceeds INT_MAX bytes");
+    if (message.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      throw std::invalid_argument("sign: message exceeds INT_MAX bytes");
     std::array<unsigned char, 64> sig{};
     throw_on_error(natsConnection_Sign(conn_.get(), reinterpret_cast<const unsigned char*>(message.data()),
                                        static_cast<int>(message.size()), sig.data()),
@@ -373,9 +375,8 @@ class connection {
   [[nodiscard]] std::string client_ip() const {
     char* value = nullptr;
     throw_on_error(natsConnection_GetClientIP(conn_.get(), &value), "natsConnection_GetClientIP");
-    std::string out = value != nullptr ? value : "";
-    std::free(value);
-    return out;
+    struct free_guard { char* p; ~free_guard() { std::free(p); } } guard{value};
+    return value != nullptr ? std::string{value} : std::string{};
   }
 
   [[nodiscard]] std::chrono::microseconds rtt() const {
@@ -392,9 +393,8 @@ class connection {
     char* ip = nullptr;
     int port = 0;
     throw_on_error(natsConnection_GetLocalIPAndPort(conn_.get(), &ip, &port), "natsConnection_GetLocalIPAndPort");
-    std::pair<std::string, int> out{ip != nullptr ? ip : "", port};
-    std::free(ip);
-    return out;
+    struct free_guard { char* p; ~free_guard() { std::free(p); } } guard{ip};
+    return {ip != nullptr ? std::string{ip} : std::string{}, port};
   }
 
   [[nodiscard]] subscription subscribe_sync(std::string_view subject) {
@@ -465,8 +465,8 @@ class connection {
 
   [[nodiscard]] message request_sync(std::string_view subject, std::string_view payload,
                                      std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
-    assert(payload.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
-           "request_sync: payload exceeds INT_MAX bytes");
+    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      throw std::invalid_argument("request_sync: payload exceeds INT_MAX bytes");
     natsMsg* reply{};
     throw_on_error(natsConnection_Request(&reply, conn_.get(), std::string(subject).c_str(), payload.data(),
                                           static_cast<int>(payload.size()), static_cast<int64_t>(timeout.count())),
@@ -499,8 +499,8 @@ class connection {
 
   [[nodiscard]] std::future<message> request_async(
       std::string subject, std::string payload, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
-    assert(payload.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
-           "request_async: payload exceeds INT_MAX bytes");
+    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      throw std::invalid_argument("request_async: payload exceeds INT_MAX bytes");
     auto conn_ref = conn_;  // extend connection lifetime across the async call
     return std::async(std::launch::async,
                       [conn_ref, subject = std::move(subject), payload = std::move(payload), timeout]() {

@@ -901,6 +901,85 @@ void test_jetstream_publish_msg_and_account_info_if_server_available() {
   js.delete_stream(stream);
 }
 
+void test_kv_optimistic_lock_conflict_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping kv optimistic lock conflict checks (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string bucket = "NATSCPP_OPT_" + ts;
+
+  auto kv = natscpp::key_value::create(nc, bucket);
+  const auto rev1 = kv.put("k", "v1");
+
+  // Update with a stale (wrong) revision must throw.
+  bool threw = false;
+  try {
+    (void)kv.update("k", "v2", rev1 + 999);
+  } catch (const natscpp::nats_error&) {
+    threw = true;
+  }
+  assert(threw && "expected nats_error on wrong-revision update");
+
+  // The key retains its original value after the failed update.
+  assert(kv.get("k").value() == "v1");
+
+  // A correct-revision update succeeds.
+  const auto rev2 = kv.update("k", "v2", rev1);
+  assert(rev2 > rev1);
+  assert(kv.get("k").value() == "v2");
+
+  natscpp::key_value::delete_bucket(nc, bucket);
+}
+
+void test_request_no_responders_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping no-responders request check (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.noreply." + ts;
+
+  // Nobody is subscribed on subj; the server should immediately return
+  // NATS_NO_RESPONDERS (no-responders is enabled by default in NATS ≥ 2.2).
+  try {
+    (void)nc.request_sync(subj, "ping", std::chrono::seconds(2));
+    assert(false && "expected nats_error for no-responders subject");
+  } catch (const natscpp::nats_error& ex) {
+    assert(ex.status() == NATS_NO_RESPONDERS);
+  }
+}
+
+void test_publish_empty_payload_roundtrip_if_server_available() {
+  natscpp::connection nc;
+  try {
+    nc.connect();
+  } catch (const natscpp::nats_error&) {
+    std::cerr << "[natscpp_unit_tests] skipping empty-payload roundtrip check (NATS server unavailable)\n";
+    return;
+  }
+
+  const auto ts = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string subj = "natscpp.empty." + ts;
+
+  natscpp::message received;
+  auto sub = nc.subscribe_sync(subj);
+  nc.publish(subj, "");
+  nc.flush();
+
+  received = sub.next_message(std::chrono::seconds(2));
+  assert(received.valid());
+  assert(received.data().empty());
+}
+
 }  // namespace
 
 namespace unit_tests {
@@ -927,6 +1006,9 @@ void run_integration_tests() {
   test_jetstream_stream_management_if_server_available();
   test_jetstream_stream_msg_access_if_server_available();
   test_jetstream_publish_msg_and_account_info_if_server_available();
+  test_kv_optimistic_lock_conflict_if_server_available();
+  test_request_no_responders_if_server_available();
+  test_publish_empty_payload_roundtrip_if_server_available();
 }
 
 }  // namespace unit_tests

@@ -25,22 +25,26 @@ class header {
   }
 
   void set(std::string_view key, std::string_view value) {
+    check_valid();
     throw_on_error(::natsHeader_Set(native_handle(), std::string(key).c_str(), std::string(value).c_str()),
                    "natsHeader_Set");
   }
 
   void add(std::string_view key, std::string_view value) {
+    check_valid();
     throw_on_error(::natsHeader_Add(native_handle(), std::string(key).c_str(), std::string(value).c_str()),
                    "natsHeader_Add");
   }
 
   [[nodiscard]] std::string get(std::string_view key) const {
+    check_valid();
     const char* value = nullptr;
     throw_on_error(::natsHeader_Get(native_handle(), std::string(key).c_str(), &value), "natsHeader_Get");
     return value != nullptr ? std::string{value} : std::string{};
   }
 
   [[nodiscard]] std::vector<std::string> values(std::string_view key) const {
+    check_valid();
     const char** vals = nullptr;
     int count = 0;
     throw_on_error(::natsHeader_Values(native_handle(), std::string(key).c_str(), &vals, &count),
@@ -55,6 +59,7 @@ class header {
   }
 
   [[nodiscard]] std::vector<std::string> keys() const {
+    check_valid();
     const char** ks = nullptr;
     int count = 0;
     throw_on_error(::natsHeader_Keys(native_handle(), &ks, &count), "natsHeader_Keys");
@@ -67,9 +72,10 @@ class header {
     return out;
   }
 
-  [[nodiscard]] int keys_count() const { return ::natsHeader_KeysCount(native_handle()); }
+  [[nodiscard]] int keys_count() const { check_valid(); return ::natsHeader_KeysCount(native_handle()); }
 
   void erase(std::string_view key) {
+    check_valid();
     throw_on_error(::natsHeader_Delete(native_handle(), std::string(key).c_str()), "natsHeader_Delete");
   }
 
@@ -81,6 +87,10 @@ class header {
   [[nodiscard]] bool valid() const noexcept { return header_ != nullptr; }
 
  private:
+  void check_valid() const {
+    if (!header_) throw nats_error(NATS_INVALID_ARG, "header: not initialized");
+  }
+
   std::unique_ptr<natsHeader, detail::header_deleter> header_;
 };
 
