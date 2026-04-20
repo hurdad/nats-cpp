@@ -28,6 +28,16 @@ set_property(CACHE NATSCPP_NATS_BACKEND PROPERTY STRINGS auto system bundled)
 
 include(CTest)
 
+# ── Common dependencies ─────────────────────────────────────────────────────
+
+find_package(Threads REQUIRED)
+target_link_libraries(natscpp INTERFACE Threads::Threads)
+
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND)
+  target_link_libraries(natscpp INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
 # ── Resolve the nats.c dependency ──────────────────────────────────────────
 
 # Determine effective backend.
