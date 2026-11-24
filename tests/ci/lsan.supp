@@ -1,0 +1,5 @@
+# LeakSanitizer suppressions for bugs in nats.c itself (not natscpp).
+#
+# nats.c 3.15.0 kvStore_PurgeDeletes (kv.c, the kvWatcher_Next loop) keeps only the delete/purge entries it
+# reads and never destroys the others; each leaked entry retains the kvStore, so its connection leaks too.
+leak:kvStore_PurgeDeletes

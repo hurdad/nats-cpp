@@ -6,9 +6,37 @@ on:
       - main
   pull_request:
 
+env:
+  NATS_SERVER_VERSION: v2.10.22
+
 jobs:
-  ctest:
+  test:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Bundled nats.c (third_party/nats.c) in every job; no system libnats.
+          - name: debug-asan-ubsan
+            build_type: Debug
+            cmake_args: >-
+              -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+            ctest_args: ""
+          - name: release
+            build_type: Release
+            cmake_args: ""
+            ctest_args: ""
+          - name: no-tls
+            build_type: Debug
+            cmake_args: -DNATSCPP_BUNDLED_WITH_TLS=OFF
+            ctest_args: -E natscpp_tls_auth   # TLS tests need a TLS-enabled nats.c
+          - name: coverage
+            build_type: Debug
+            cmake_args: -DCMAKE_CXX_FLAGS="--coverage -O0"
+            ctest_args: ""
+            coverage: true
 
     steps:
       - name: Checkout
@@ -16,11 +44,54 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev
+          curl -fsSL -o nats-server.tar.gz \
+            "https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_VERSION}/nats-server-${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          tar xzf nats-server.tar.gz
+          sudo install "nats-server-${NATS_SERVER_VERSION}-linux-amd64/nats-server" /usr/local/bin/
+          nats-server --version
+          if [ "${{ matrix.coverage }}" = "true" ]; then pipx install gcovr; fi
+
+      - name: Start nats-servers
+        run: tests/ci/start-servers.sh "$RUNNER_TEMP/nats" >> "$GITHUB_ENV"
+
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DNATSCPP_NATS_BACKEND=bundled
+          ${{ matrix.cmake_args }}
 
       - name: Build
-        run: cmake --build build --config Debug
+        run: cmake --build build --parallel
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        env:
+          NATSCPP_REQUIRE_SERVER: "1"   # a skipped server test fails the job
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/ci/lsan.supp:print_suppressions=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure ${{ matrix.ctest_args }}
+
+      - name: Coverage report
+        if: matrix.coverage
+        run: |
+          gcovr -r . --object-directory build --filter 'include/natscpp/' \
+            --gcov-ignore-parse-errors=all --txt-metric branch --print-summary \
+            --html-details coverage.html
+          { echo '```'; gcovr -r . --object-directory build --filter 'include/natscpp/' \
+              --gcov-ignore-parse-errors=all; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage
+        if: matrix.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage*.html
+
+      - name: Server logs
+        if: failure()
+        run: tail -n 50 "$RUNNER_TEMP"/nats/*.log || true

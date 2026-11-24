@@ -34,7 +34,7 @@ void test_connection_state_accessors_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping connection state checks (NATS server unavailable)\n";
+    unit_tests::skip("connection state checks (NATS server unavailable)");
     return;
   }
 
@@ -58,7 +58,7 @@ void test_jetstream_consumer_group_crud_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping jetstream consumer group checks (NATS server unavailable)\n";
+    unit_tests::skip("jetstream consumer group checks (NATS server unavailable)");
     return;
   }
 
@@ -118,7 +118,7 @@ void test_kv_bucket_and_key_crud_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping kv checks (NATS server unavailable)\n";
+    unit_tests::skip("kv checks (NATS server unavailable)");
     return;
   }
 
@@ -157,7 +157,7 @@ void test_publish_request_variants_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping publish_request variants (NATS server unavailable)\n";
+    unit_tests::skip("publish_request variants (NATS server unavailable)");
     return;
   }
 
@@ -198,7 +198,7 @@ void test_queue_subscription_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping queue subscription checks (NATS server unavailable)\n";
+    unit_tests::skip("queue subscription checks (NATS server unavailable)");
     return;
   }
 
@@ -223,7 +223,7 @@ void test_subscription_drain_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping subscription drain checks (NATS server unavailable)\n";
+    unit_tests::skip("subscription drain checks (NATS server unavailable)");
     return;
   }
 
@@ -242,7 +242,7 @@ void test_kv_put_erase_and_entry_fields_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping kv put/erase/fields checks (NATS server unavailable)\n";
+    unit_tests::skip("kv put/erase/fields checks (NATS server unavailable)");
     return;
   }
 
@@ -284,7 +284,7 @@ void test_kv_watchers_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping kv watcher checks (NATS server unavailable)\n";
+    unit_tests::skip("kv watcher checks (NATS server unavailable)");
     return;
   }
 
@@ -332,7 +332,7 @@ void test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_ava
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping jetstream publish/subscription checks (NATS server unavailable)\n";
+    unit_tests::skip("jetstream publish/subscription checks (NATS server unavailable)");
     return;
   }
 
@@ -441,7 +441,7 @@ void test_connection_sync_and_async_roundtrip_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping connection integration checks (NATS server unavailable)\n";
+    unit_tests::skip("connection integration checks (NATS server unavailable)");
     return;
   }
 
@@ -507,7 +507,7 @@ void test_publish_message_overload_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping publish(message) overload checks (NATS server unavailable)\n";
+    unit_tests::skip("publish(message) overload checks (NATS server unavailable)");
     return;
   }
 
@@ -529,7 +529,7 @@ void test_subscribe_async_timeout_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping subscribe_async_timeout checks (NATS server unavailable)\n";
+    unit_tests::skip("subscribe_async_timeout checks (NATS server unavailable)");
     return;
   }
 
@@ -554,7 +554,7 @@ void test_subscribe_queue_sync_and_queue_async_timeout_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping subscribe_queue_sync/queue_async_timeout checks (NATS server unavailable)\n";
+    unit_tests::skip("subscribe_queue_sync/queue_async_timeout checks (NATS server unavailable)");
     return;
   }
 
@@ -593,7 +593,7 @@ void test_subscription_on_complete_callback_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping on_complete_callback checks (NATS server unavailable)\n";
+    unit_tests::skip("on_complete_callback checks (NATS server unavailable)");
     return;
   }
 
@@ -640,7 +640,7 @@ void test_request_awaitable_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping request_awaitable checks (NATS server unavailable)\n";
+    unit_tests::skip("request_awaitable checks (NATS server unavailable)");
     return;
   }
 
@@ -675,7 +675,7 @@ void test_key_value_open_constructor_and_full_config_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping kv open constructor/full config checks (NATS server unavailable)\n";
+    unit_tests::skip("kv open constructor/full config checks (NATS server unavailable)");
     return;
   }
 
@@ -707,7 +707,7 @@ void test_key_value_keys_with_filters_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping kv keys_with_filters checks (NATS server unavailable)\n";
+    unit_tests::skip("kv keys_with_filters checks (NATS server unavailable)");
     return;
   }
 
@@ -736,7 +736,7 @@ void test_key_value_history_and_purge_deletes_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping kv history/purge_deletes checks (NATS server unavailable)\n";
+    unit_tests::skip("kv history/purge_deletes checks (NATS server unavailable)");
     return;
   }
 
@@ -775,7 +775,7 @@ void test_jetstream_stream_management_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping jetstream stream management checks (NATS server unavailable)\n";
+    unit_tests::skip("jetstream stream management checks (NATS server unavailable)");
     return;
   }
 
@@ -838,7 +838,7 @@ void test_jetstream_stream_msg_access_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping jetstream stream msg access checks (NATS server unavailable)\n";
+    unit_tests::skip("jetstream stream msg access checks (NATS server unavailable)");
     return;
   }
 
@@ -880,7 +880,7 @@ void test_jetstream_publish_msg_and_account_info_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping jetstream publish_msg/account_info checks (NATS server unavailable)\n";
+    unit_tests::skip("jetstream publish_msg/account_info checks (NATS server unavailable)");
     return;
   }
 
@@ -910,7 +910,7 @@ void test_kv_optimistic_lock_conflict_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping kv optimistic lock conflict checks (NATS server unavailable)\n";
+    unit_tests::skip("kv optimistic lock conflict checks (NATS server unavailable)");
     return;
   }
 
@@ -945,7 +945,7 @@ void test_request_no_responders_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping no-responders request check (NATS server unavailable)\n";
+    unit_tests::skip("no-responders request check (NATS server unavailable)");
     return;
   }
 
@@ -967,7 +967,7 @@ void test_publish_empty_payload_roundtrip_if_server_available() {
   try {
     nc.connect();
   } catch (const natscpp::nats_error&) {
-    std::cerr << "[natscpp_unit_tests] skipping empty-payload roundtrip check (NATS server unavailable)\n";
+    unit_tests::skip("empty-payload roundtrip check (NATS server unavailable)");
     return;
   }
 
