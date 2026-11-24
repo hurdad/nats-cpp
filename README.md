@@ -46,7 +46,9 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
 - CMake 3.20+
 - `nats.c` dependency, resolved in one of two ways:
   - bundled submodule at `third_party/nats.c` (static build wired automatically by CMake), or
-  - system install discoverable as `libnats` via `pkg-config`
+  - system install that provides the `cnats` CMake package (e.g. Debian/Ubuntu `libnats-dev`, or nats.c's own
+    `cmake --install`), found with `find_package(cnats)`; add its prefix to `CMAKE_PREFIX_PATH` if it is not in a
+    standard location
 
 ## Build and test
 
@@ -56,7 +58,17 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-If `third_party/nats.c` is not initialized, configure will fail unless `libnats` is installed and visible to `pkg-config`.
+`NATSCPP_NATS_BACKEND` picks the nats.c source: `auto` (default) uses a system `cnats` package if one is found and
+otherwise falls back to the bundled submodule, `system` requires the system package, and `bundled` always uses the
+submodule. With `auto`, if `third_party/nats.c` is not initialized and no `cnats` package is found, configure fails.
+
+The bundled submodule is built without TLS, so TLS options (including `ssl_verification_callback`) need a system
+nats.c built with TLS, such as `libnats-dev`:
+
+```bash
+sudo apt install libnats-dev
+cmake -S . -B build -DNATSCPP_NATS_BACKEND=system
+```
 
 ## Install
 
