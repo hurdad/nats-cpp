@@ -182,6 +182,43 @@ Request/reply example is available in:
 | `certificates_chain_file` + `private_key_file` / `load_certificates_chain()` | Client cert + key |
 | `skip_server_verification` / `set_skip_server_verification()` | Disable hostname check |
 | `expected_hostname` / `set_expected_hostname()` | TLS SNI override |
+| `ssl_verification_callback` / `set_ssl_verification_callback()` | Custom OpenSSL verify callback (nats.c ≥ 3.10, EXPERIMENTAL there) |
+
+`ssl_verification_callback` is a plain `natsSSLVerifyCb` function pointer (`int(int preverify_ok, void* ctx)`,
+where `ctx` is an `X509_STORE_CTX*`). nats.c passes no user-data pointer, so any state the callback needs must be
+global/static. It replaces nats.c's own verify callback, so return `0` when `preverify_ok` is `0` to keep normal
+chain verification. It is applied after the other TLS options: setting it turns server verification back on even
+if `skip_server_verification` is `true`. The field only exists when building against nats.c 3.10.0 or newer
+(`NATS_VERSION_NUMBER >= 0x030A00`). With a nats.c built without TLS (the bundled submodule build), `connect()` throws
+`NATS_ILLEGAL_STATE`.
+
+Example: accept the server only if its certificate was issued by one specific intermediate CA:
+
+```cpp
+#include <natscpp/connection.hpp>
+#include <openssl/x509_vfy.h>
+
+static X509* g_pinned_issuer;  // loaded once at startup, e.g. with PEM_read_X509
+
+static int pin_issuer(int preverify_ok, void* ctx) {
+  if (!preverify_ok) return 0;                       // chain must verify against the CA first
+  auto* store = static_cast<X509_STORE_CTX*>(ctx);
+  if (X509_STORE_CTX_get_error_depth(store) != 0) return 1;
+  STACK_OF(X509)* chain = X509_STORE_CTX_get0_chain(store);
+  return chain && sk_X509_num(chain) >= 2 && X509_cmp(sk_X509_value(chain, 1), g_pinned_issuer) == 0;
+}
+
+natscpp::connection_options opts;
+opts.set_url("tls://nats.example:4222");
+opts.load_ca_trusted_certificates("root-ca.pem");
+opts.set_ssl_verification_callback(&pin_issuer);
+```
+
+**Escape hatch**
+
+| Field / setter | Description |
+|---|---|
+| `customize_options` / `set_customize_options()` | `std::function<void(natsOptions*)>` called after every other option is applied, just before connecting; for nats.c options the wrapper does not cover |
 
 **Lifecycle callbacks**
 

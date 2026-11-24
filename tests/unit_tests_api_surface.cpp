@@ -79,7 +79,14 @@ void test_connection_has_sync_and_async_apis() {
     opts.set_timeout(std::chrono::seconds(2));
     opts.set_name("cpp-client");
     opts.set_no_echo(true);
+    opts.set_customize_options([](natsOptions*) {});
   });
+#if NATS_VERSION_NUMBER >= 0x030A00
+  static_assert(requires(natscpp::connection_options opts, natsSSLVerifyCb cb) {
+    opts.set_ssl_verification_callback(cb);
+    { opts.ssl_verification_callback } -> std::same_as<std::optional<natsSSLVerifyCb>&>;
+  });
+#endif
   static_assert(requires(natscpp::message m) { m.ack_sync(); m.nak_with_delay(std::chrono::milliseconds(10)); m.get_metadata(); });
   static_assert(requires(char* buffer, size_t buf_len, FILE* stream, natsClientConfig* cfg,
                          unsigned char** signature, int* signature_length) {

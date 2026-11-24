@@ -657,6 +657,75 @@ void test_future_awaitable_destroyed_before_future_ready() {
   // No crash or sanitizer complaint = CAS guard is working.
 }
 
+
+#if NATS_VERSION_NUMBER >= 0x030A00
+int accept_all_verify_cb(int preverify_ok, void* /*x509_store_ctx*/) { return preverify_ok; }
+
+void test_ssl_verification_callback_setter_stores_pointer() {
+  natscpp::connection_options opts;
+  assert(!opts.ssl_verification_callback);
+  opts.set_ssl_verification_callback(&accept_all_verify_cb);
+  assert(opts.ssl_verification_callback);
+  assert(*opts.ssl_verification_callback == &accept_all_verify_cb);
+}
+
+void test_ssl_verification_callback_is_applied_before_customize_options() {
+  // Port 1 is never a NATS server, so connect() can only fail; what it fails with tells us whether
+  // natsOptions_SetSSLVerificationCallback was called.
+  natscpp::connection_options opts;
+  opts.set_url("nats://127.0.0.1:1");
+  opts.set_timeout(std::chrono::milliseconds(200));
+  opts.set_ssl_verification_callback(&accept_all_verify_cb);
+  int customize_calls = 0;
+  opts.set_customize_options([&](natsOptions* nopts) {
+    assert(nopts != nullptr);
+    ++customize_calls;
+  });
+
+  natscpp::connection nc;
+  try {
+    nc.connect(opts);
+    assert(false && "connect to port 1 should fail");
+  } catch (const natscpp::nats_error& ex) {
+    const std::string what{ex.what()};
+    if (what.find("natsOptions_SetSSLVerificationCallback") != std::string::npos) {
+      // nats.c built without TLS (e.g. the bundled build): the call reached nats.c's stub,
+      // and failed before customize_options.
+      assert(ex.status() == NATS_ILLEGAL_STATE);
+      assert(customize_calls == 0);
+    } else {
+      // nats.c built with TLS: the callback was accepted and customize_options ran after it.
+      assert(what.find("natsConnection_Connect") != std::string::npos);
+      assert(customize_calls == 1);
+    }
+  }
+  assert(!nc.connected());
+}
+#endif
+
+void test_customize_options_runs_last_and_propagates_exceptions() {
+  struct sentinel {};
+  natscpp::connection_options opts;
+  opts.set_url("nats://127.0.0.1:1");
+  opts.set_name("before-customize");
+  opts.retry_on_failed_connect = true;
+  int calls = 0;
+  opts.set_customize_options([&](natsOptions* nopts) {
+    assert(nopts != nullptr);
+    ++calls;
+    throw sentinel{};  // must abort connect() before natsConnection_Connect is reached
+  });
+
+  natscpp::connection nc;
+  try {
+    nc.connect(opts);
+    assert(false && "customize_options exception should propagate");
+  } catch (const sentinel&) {
+  }
+  assert(calls == 1);
+  assert(!nc.connected());
+}
+
 }  // namespace
 
 namespace unit_tests {
@@ -693,6 +762,11 @@ void run_core_unit_tests() {
   test_library_version_and_time_functions();
   test_future_awaitable_suspend_resumes_via_noop_handle();
   test_future_awaitable_destroyed_before_future_ready();
+#if NATS_VERSION_NUMBER >= 0x030A00
+  test_ssl_verification_callback_setter_stores_pointer();
+  test_ssl_verification_callback_is_applied_before_customize_options();
+#endif
+  test_customize_options_runs_last_and_propagates_exceptions();
 }
 
 }  // namespace unit_tests

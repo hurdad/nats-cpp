@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(natscpp
-  VERSION 0.1.0
+  VERSION 0.1.2
   DESCRIPTION "Modern header-only C++20 wrapper for nats.c"
   LANGUAGES CXX)
 
