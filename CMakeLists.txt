@@ -34,9 +34,15 @@ find_package(Threads REQUIRED)
 target_link_libraries(natscpp INTERFACE Threads::Threads)
 
 find_package(OpenSSL QUIET)
+
+# TLS for the bundled nats.c build: on by default when OpenSSL is available.
+# (The system backend's TLS support is whatever that nats.c was built with.)
 if(OpenSSL_FOUND)
-  target_link_libraries(natscpp INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+  set(_natscpp_tls_default ON)
+else()
+  set(_natscpp_tls_default OFF)
 endif()
+option(NATSCPP_BUNDLED_WITH_TLS "Build the bundled nats.c with TLS (needs OpenSSL)" ${_natscpp_tls_default})
 
 # ── Resolve the nats.c dependency ──────────────────────────────────────────
 
@@ -67,7 +73,13 @@ if(_natscpp_use_bundled)
   set(NATS_BUILD_LIB_STATIC ON  CACHE BOOL "" FORCE)
   set(NATS_BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
   set(NATS_BUILD_STREAMING  OFF CACHE BOOL "" FORCE)
-  set(NATS_BUILD_WITH_TLS   OFF CACHE BOOL "" FORCE)
+  if(NATSCPP_BUNDLED_WITH_TLS AND NOT OpenSSL_FOUND)
+    message(FATAL_ERROR "NATSCPP_BUNDLED_WITH_TLS=ON but OpenSSL was not found")
+  endif()
+  set(NATS_BUILD_WITH_TLS ${NATSCPP_BUNDLED_WITH_TLS} CACHE BOOL "" FORCE)
+  set(NATSCPP_LINKS_OPENSSL ${NATSCPP_BUNDLED_WITH_TLS})
+  set(_natscpp_has_tls ${NATSCPP_BUNDLED_WITH_TLS})
+  message(STATUS "natscpp: bundled nats.c TLS support: ${NATSCPP_BUNDLED_WITH_TLS}")
   set(NATS_BUILD_WITH_DEPRECATED OFF CACHE BOOL "" FORCE)
   set(BUILD_TESTING         OFF CACHE BOOL "" FORCE)
 
@@ -88,18 +100,49 @@ else()
   # nats.c installs a cmake package named "cnats" for both shared and static
   # builds.  Prefer the shared target (cnats::nats); fall back to static.
   find_package(cnats REQUIRED)
+  # A static cnats does not carry its OpenSSL dependency, so link it when present.
+  set(NATSCPP_LINKS_OPENSSL ${OpenSSL_FOUND})
 
   if(TARGET cnats::nats)
     target_link_libraries(natscpp INTERFACE cnats::nats)
-    get_target_property(_nats_ver cnats::nats IMPORTED_SONAME_RELEASE)
+    set(_natscpp_cnats_target cnats::nats)
     message(STATUS "natscpp: using system nats.c (shared)")
   elseif(TARGET cnats::nats_static)
     target_link_libraries(natscpp INTERFACE cnats::nats_static)
+    set(_natscpp_cnats_target cnats::nats_static)
     message(STATUS "natscpp: using system nats.c (static)")
   else()
     message(FATAL_ERROR
       "cnats package found but provides neither cnats::nats nor cnats::nats_static.")
   endif()
+endif()
+
+if(NATSCPP_LINKS_OPENSSL)
+  target_link_libraries(natscpp INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
+# A system nats.c does not say whether it has TLS: probe for a TLS-only symbol
+# (nats.c built without TLS has no natsOptions_SetCipherSuites at all).
+if(NOT _natscpp_use_bundled)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_LIBRARIES ${_natscpp_cnats_target})
+  if(NATSCPP_LINKS_OPENSSL)
+    list(APPEND CMAKE_REQUIRED_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
+  endif()
+  set(CMAKE_REQUIRED_QUIET ON)
+  check_cxx_source_compiles([=[
+    #include <nats.h>
+    int main() { natsOptions* o = nullptr; return natsOptions_SetCipherSuites(o, "") == NATS_OK ? 0 : 1; }
+  ]=] NATSCPP_SYSTEM_NATS_HAS_TLS)
+  unset(CMAKE_REQUIRED_LIBRARIES)
+  unset(CMAKE_REQUIRED_QUIET)
+  set(_natscpp_has_tls ${NATSCPP_SYSTEM_NATS_HAS_TLS})
+  message(STATUS "natscpp: system nats.c TLS support: ${_natscpp_has_tls}")
+endif()
+
+# Lets the headers call TLS-only nats.c functions (see connection.hpp).
+if(_natscpp_has_tls)
+  target_compile_definitions(natscpp INTERFACE NATS_HAS_TLS)
 endif()
 
 # ── Tests ───────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -139,10 +140,21 @@ class kv_watcher {
 
   [[nodiscard]] bool valid() const noexcept { return watcher_ != nullptr; }
 
+  // Waits up to timeout_ms for the next entry (throws NATS_TIMEOUT when it expires). timeout_ms <= 0, the default,
+  // blocks until an entry arrives or the watcher is stopped; nats.c itself rejects non-positive timeouts, so that
+  // case waits in bounded slices.
   [[nodiscard]] kv_entry next(int64_t timeout_ms = -1) {
     check_valid();
     kvEntry* entry = nullptr;
-    throw_on_error(kvWatcher_Next(&entry, watcher_, timeout_ms), "kvWatcher_Next");
+    if (timeout_ms > 0) {
+      throw_on_error(kvWatcher_Next(&entry, watcher_, timeout_ms), "kvWatcher_Next");
+      return kv_entry{entry};
+    }
+    constexpr int64_t slice_ms = 60 * 60 * 1000;
+    natsStatus status = NATS_TIMEOUT;
+    while ((status = kvWatcher_Next(&entry, watcher_, slice_ms)) == NATS_TIMEOUT) {
+    }
+    throw_on_error(status, "kvWatcher_Next");
     return kv_entry{entry};
   }
 
@@ -200,13 +212,17 @@ class key_value {
    * @brief Create or open a KV bucket using a full kv_config.
    */
   static key_value create(const connection& conn, const kv_config& config) {
+    // kvConfig.History is a uint8_t: reject values that would silently wrap (nats.c enforces its own maximum).
+    if (config.history < 0 || config.history > std::numeric_limits<uint8_t>::max()) {
+      throw nats_error(NATS_INVALID_ARG, "kv_config: history out of range");
+    }
     key_value out;
     throw_on_error(natsConnection_JetStream(&out.ctx_, conn.native_handle(), nullptr), "natsConnection_JetStream");
     kvConfig cfg{};
     throw_on_error(kvConfig_Init(&cfg), "kvConfig_Init");
     const std::string bucket_name = config.bucket;
     cfg.Bucket        = bucket_name.c_str();
-    cfg.History       = config.history;
+    cfg.History       = static_cast<uint8_t>(config.history);
     cfg.TTL           = config.ttl_ns;
     cfg.MaxValueSize  = config.max_value_size;
     cfg.MaxBytes      = config.max_bytes;

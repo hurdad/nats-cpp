@@ -62,13 +62,18 @@ ctest --test-dir build --output-on-failure
 otherwise falls back to the bundled submodule, `system` requires the system package, and `bundled` always uses the
 submodule. With `auto`, if `third_party/nats.c` is not initialized and no `cnats` package is found, configure fails.
 
-The bundled submodule is built without TLS, so TLS options (including `ssl_verification_callback`) need a system
-nats.c built with TLS, such as `libnats-dev`:
+TLS: the bundled submodule is built with TLS when OpenSSL is found (`NATSCPP_BUNDLED_WITH_TLS`, default ON if
+OpenSSL is available; set it OFF to build without). A system nats.c has whatever TLS support it was built with;
+`libnats-dev` includes it:
 
 ```bash
 sudo apt install libnats-dev
 cmake -S . -B build -DNATSCPP_NATS_BACKEND=system
 ```
+
+Without TLS in nats.c, TLS options (including `ssl_verification_callback`) make `connect()` throw `NATS_ILLEGAL_STATE`.
+The `natscpp::natscpp` target defines `NATS_HAS_TLS` when the nats.c it links has TLS (probed for a system nats.c);
+`ca_certs_path` and `cipher_suites` need it. Define it yourself if you use the headers without that target.
 
 ## Install
 
@@ -201,8 +206,7 @@ where `ctx` is an `X509_STORE_CTX*`). nats.c passes no user-data pointer, so any
 global/static. It replaces nats.c's own verify callback, so return `0` when `preverify_ok` is `0` to keep normal
 chain verification. It is applied after the other TLS options: setting it turns server verification back on even
 if `skip_server_verification` is `true`. The field only exists when building against nats.c 3.10.0 or newer
-(`NATS_VERSION_NUMBER >= 0x030A00`). With a nats.c built without TLS (the bundled submodule build), `connect()` throws
-`NATS_ILLEGAL_STATE`.
+(`NATS_VERSION_NUMBER >= 0x030A00`). With a nats.c built without TLS, `connect()` throws `NATS_ILLEGAL_STATE`.
 
 Example: accept the server only if its certificate was issued by one specific intermediate CA:
 
@@ -523,7 +527,7 @@ watch_opts.updates_only = true;
 auto watcher = kv.watch("user-1", &watch_opts);
 
 kv.put("user-1", R"({"name":"Ada","active":true})");
-auto updated = watcher.next(1000);  // timeout in milliseconds
+auto updated = watcher.next(1000);  // timeout in milliseconds; next() with no argument blocks until an entry or stop()
 watcher.stop();
 
 kv.erase("user-1");

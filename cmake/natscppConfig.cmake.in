@@ -5,6 +5,11 @@ include(CMakeFindDependencyMacro)
 # nats_static / nats (shared) both depend on pthreads.
 find_dependency(Threads REQUIRED)
 
+# natscpp's interface names OpenSSL::SSL / OpenSSL::Crypto when it was built with them.
+if("@NATSCPP_LINKS_OPENSSL@")
+  find_dependency(OpenSSL REQUIRED)
+endif()
+
 # natscpp links against a cnats target (cnats::nats_static for the bundled
 # build, cnats::nats for a system shared-library build).  Check the co-install
 # location first (bundled case) then fall back to the normal cmake search path

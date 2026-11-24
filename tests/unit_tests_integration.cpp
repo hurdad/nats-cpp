@@ -1,3 +1,6 @@
+// The checks below are assert()s, several with side effects (waits, gets); keep them active in Release builds.
+#undef NDEBUG
+
 #include "unit_tests.hpp"
 
 #include <natscpp/awaitable.hpp>

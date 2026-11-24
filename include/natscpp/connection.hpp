@@ -568,29 +568,14 @@ class connection {
   [[nodiscard]] subscription register_async_subscription(std::function<void(message)> handler,
                                                          const char* context_name,
                                                          SubscribeFn do_subscribe) {
+    // The subscription owns its handler (via on_release), so the closure pointer nats.c holds stays valid exactly
+    // as long as the natsSubscription does, independent of this connection object's lifetime or moves.
     auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
-    auto state = callback_state_;
-
-    {
-      std::lock_guard<std::mutex> lock(state->mutex);
-      state->callbacks[token.get()] = token;
-    }
 
     natsSubscription* raw{};
-    natsStatus status = do_subscribe(&raw, &async_msg_callback, token.get());
+    throw_on_error(do_subscribe(&raw, &async_msg_callback, token.get()), context_name);
 
-    if (status != NATS_OK) {
-      std::lock_guard<std::mutex> lock(state->mutex);
-      state->callbacks.erase(token.get());
-      throw_on_error(status, context_name);
-    }
-
-    return subscription{raw, [state = std::weak_ptr<callback_state>(state), key = token.get()] {
-      if (const auto locked = state.lock()) {
-        std::lock_guard<std::mutex> lock(locked->mutex);
-        locked->callbacks.erase(key);
-      }
-    }};
+    return subscription{raw, [token = std::move(token)]() mutable { token.reset(); }};
   }
 
   [[nodiscard]] std::vector<std::string> fetch_server_list(
@@ -611,11 +596,6 @@ class connection {
     }
     return out;
   }
-
-  struct callback_state {
-    std::unordered_map<void*, std::shared_ptr<std::function<void(message)>>> callbacks;
-    std::mutex mutex;
-  };
 
   struct callback_handlers {
     std::function<void(natsConnection*)> closed_cb;
@@ -710,8 +690,9 @@ class connection {
       throw_on_error(::natsOptions_SetUserCredentialsFromFiles(nopts, options.user_credentials_file->c_str(), seed_file),
                      "natsOptions_SetUserCredentialsFromFiles");
     }
-    if (options.user && options.password) {
-      throw_on_error(::natsOptions_SetUserInfo(nopts, options.user->c_str(), options.password->c_str()),
+    if (options.user) {  // password is optional; nats.c accepts a NULL password
+      throw_on_error(::natsOptions_SetUserInfo(nopts, options.user->c_str(),
+                                               options.password ? options.password->c_str() : nullptr),
                      "natsOptions_SetUserInfo");
     }
 
@@ -724,16 +705,20 @@ class connection {
                      "natsOptions_LoadCATrustedCertificates");
     }
     if (options.ca_certs_path) {
+// nats.c has no stub for these two when built without TLS. natscpp's CMake target defines NATS_HAS_TLS when the
+// nats.c it links has TLS; define it yourself if you build without that target.
 #ifdef NATS_HAS_TLS
       throw_on_error(::natsOptions_LoadCATrustedCertificatesPath(nopts, options.ca_certs_path->c_str()),
                      "natsOptions_LoadCATrustedCertificatesPath");
 #else
-      throw nats_error(NATS_ILLEGAL_STATE, "natsOptions_LoadCATrustedCertificatesPath: TLS not compiled in");
+      throw nats_error(NATS_ILLEGAL_STATE, "natsOptions_LoadCATrustedCertificatesPath: NATS_HAS_TLS not defined");
 #endif
     }
-    if (options.certificates_chain_file && options.private_key_file) {
-      throw_on_error(::natsOptions_LoadCertificatesChain(nopts, options.certificates_chain_file->c_str(),
-                                                         options.private_key_file->c_str()),
+    // Either one set without the other is a configuration error; nats.c rejects it with NATS_INVALID_ARG.
+    if (options.certificates_chain_file || options.private_key_file) {
+      throw_on_error(::natsOptions_LoadCertificatesChain(
+                         nopts, options.certificates_chain_file ? options.certificates_chain_file->c_str() : nullptr,
+                         options.private_key_file ? options.private_key_file->c_str() : nullptr),
                      "natsOptions_LoadCertificatesChain");
     }
     if (options.skip_server_verification) {
@@ -752,7 +737,7 @@ class connection {
       throw_on_error(::natsOptions_SetCipherSuites(nopts, options.cipher_suites->c_str()),
                      "natsOptions_SetCipherSuites");
 #else
-      throw nats_error(NATS_ILLEGAL_STATE, "natsOptions_SetCipherSuites: TLS not compiled in");
+      throw nats_error(NATS_ILLEGAL_STATE, "natsOptions_SetCipherSuites: NATS_HAS_TLS not defined");
 #endif
     }
 #if NATS_VERSION_NUMBER >= 0x030A00
@@ -891,7 +876,6 @@ class connection {
   }
 
   std::shared_ptr<natsConnection> conn_;
-  std::shared_ptr<callback_state> callback_state_ = std::make_shared<callback_state>();
   std::shared_ptr<callback_handlers> callback_handlers_;
 };
 

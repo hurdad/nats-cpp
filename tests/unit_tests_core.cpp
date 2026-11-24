@@ -1,3 +1,6 @@
+// The checks below are assert()s, several with side effects (waits, gets); keep them active in Release builds.
+#undef NDEBUG
+
 #include "unit_tests.hpp"
 
 #include <natscpp/awaitable.hpp>
@@ -689,7 +692,7 @@ void test_ssl_verification_callback_is_applied_before_customize_options() {
   } catch (const natscpp::nats_error& ex) {
     const std::string what{ex.what()};
     if (what.find("natsOptions_SetSSLVerificationCallback") != std::string::npos) {
-      // nats.c built without TLS (e.g. the bundled build): the call reached nats.c's stub,
+      // nats.c built without TLS: the call reached nats.c's stub,
       // and failed before customize_options.
       assert(ex.status() == NATS_ILLEGAL_STATE);
       assert(customize_calls == 0);
@@ -724,6 +727,47 @@ void test_customize_options_runs_last_and_propagates_exceptions() {
   }
   assert(calls == 1);
   assert(!nc.connected());
+}
+
+
+void test_moved_from_connection_subscribe_async_throws() {
+  natscpp::connection a;
+  natscpp::connection b = std::move(a);
+  try {
+    auto sub = a.subscribe_async("x", [](natscpp::message) {});  // NOLINT(bugprone-use-after-move): intended
+    assert(false && "subscribe_async on a moved-from connection should throw");
+  } catch (const natscpp::nats_error&) {
+  }
+}
+
+void test_kv_config_history_out_of_range_throws() {
+  natscpp::connection nc;  // never reached: validation happens first
+  for (int64_t h : {int64_t{-1}, int64_t{256}, int64_t{300}}) {
+    natscpp::kv_config cfg;
+    cfg.bucket = "b";
+    cfg.history = h;
+    try {
+      (void)natscpp::key_value::create(nc, cfg);
+      assert(false && "history out of range should throw");
+    } catch (const natscpp::nats_error& ex) {
+      assert(ex.status() == NATS_INVALID_ARG);
+      assert(std::string(ex.what()).find("history") != std::string::npos);
+    }
+  }
+}
+
+void test_certificate_chain_without_key_is_rejected() {
+  natscpp::connection_options opts;
+  opts.set_url("nats://127.0.0.1:1");
+  opts.certificates_chain_file = "cert.pem";  // no private_key_file
+  natscpp::connection nc;
+  try {
+    nc.connect(opts);
+    assert(false && "connect should fail");
+  } catch (const natscpp::nats_error& ex) {
+    // Previously the half-set option was silently skipped and connect failed only for lack of a server.
+    assert(std::string(ex.what()).find("natsOptions_LoadCertificatesChain") != std::string::npos);
+  }
 }
 
 }  // namespace
@@ -767,6 +811,9 @@ void run_core_unit_tests() {
   test_ssl_verification_callback_is_applied_before_customize_options();
 #endif
   test_customize_options_runs_last_and_propagates_exceptions();
+  test_moved_from_connection_subscribe_async_throws();
+  test_kv_config_history_out_of_range_throws();
+  test_certificate_chain_without_key_is_rejected();
 }
 
 }  // namespace unit_tests

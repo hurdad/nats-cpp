@@ -72,6 +72,7 @@ class subscription {
       return *this;
     }
 
+    sub_.reset();  // same order as the destructor: stop delivery before releasing the closure
     release_callback();
     sub_ = std::move(other.sub_);
     on_release_ = std::move(other.on_release_);

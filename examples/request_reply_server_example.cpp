@@ -10,7 +10,13 @@ int main() {
   std::cout << "[server] listening on svc.echo\n";
 
   while (true) {
-    auto req = service.next_message(std::chrono::seconds(30));
+    natscpp::message req;
+    try {
+      req = service.next_message(std::chrono::seconds(30));
+    } catch (const natscpp::nats_error& e) {
+      if (e.status() == NATS_TIMEOUT) continue;  // idle: keep waiting
+      throw;
+    }
     if (req.reply_to().empty()) {
       continue;
     }
