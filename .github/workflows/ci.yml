@@ -81,9 +81,18 @@ jobs:
         run: |
           gcovr -r . --object-directory build --filter 'include/natscpp/' \
             --gcov-ignore-parse-errors=all --txt-metric branch --print-summary \
-            --html-details coverage.html
+            --html-details coverage.html --cobertura coverage.xml
           { echo '```'; gcovr -r . --object-directory build --filter 'include/natscpp/' \
               --gcov-ignore-parse-errors=all; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        if: matrix.coverage
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          disable_search: true
+          fail_ci_if_error: false   # a Codecov outage or missing token must not fail the build
 
       - name: Upload coverage
         if: matrix.coverage

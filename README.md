@@ -1,5 +1,8 @@
 # natscpp
 
+[![CI](https://img.shields.io/github/actions/workflow/status/hurdad/nats-cpp/ci.yml?branch=main&logo=github&label=CI)](https://github.com/hurdad/nats-cpp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/hurdad/nats-cpp/branch/main/graph/badge.svg)](https://codecov.io/gh/hurdad/nats-cpp)
+
 Modern, header-only **C++20** wrappers for the official [`nats.c`](https://github.com/nats-io/nats.c) client.
 
 ## Table of contents
