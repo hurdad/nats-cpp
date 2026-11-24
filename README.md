@@ -201,6 +201,12 @@ Request/reply example is available in:
 | `expected_hostname` / `set_expected_hostname()` | TLS SNI override |
 | `ssl_verification_callback` / `set_ssl_verification_callback()` | Custom OpenSSL verify callback (nats.c ≥ 3.10, EXPERIMENTAL there) |
 
+Since nats.c 3.15.0, setting any TLS option (CA, client certificate, ciphers, expected hostname, verification
+callback, skip verification) makes the client require TLS: connecting to a plaintext server fails with
+`NATS_SECURE_CONNECTION_WANTED`. `set_secure(false)` opts out (natscpp applies `secure` before the other TLS
+options, as nats.c requires), and a `tls://` URL always uses TLS. nats.c 3.15.0 also rejects `ws://` and `wss://`
+URLs with `NATS_INVALID_ARG`.
+
 `ssl_verification_callback` is a plain `natsSSLVerifyCb` function pointer (`int(int preverify_ok, void* ctx)`,
 where `ctx` is an `X509_STORE_CTX*`). nats.c passes no user-data pointer, so any state the callback needs must be
 global/static. It replaces nats.c's own verify callback, so return `0` when `preverify_ok` is `0` to keep normal

@@ -52,6 +52,10 @@ struct connection_options {
   void* token_handler_closure = nullptr;
 
   // --- TLS ---
+  // Applied before every other TLS option. Since nats.c 3.15.0, setting any TLS option (CA, client chain, ciphers,
+  // expected hostname, verification callback, skip verification) makes the connection require TLS
+  // (NATS_SECURE_CONNECTION_WANTED against a plaintext server); secure = false opts out, and a tls:// URL uses TLS
+  // regardless.
   std::optional<bool> secure;
   std::optional<std::string> ca_trusted_certificates_file;
   std::optional<std::string> ca_certs_path;           // directory of CA certificates

@@ -87,10 +87,16 @@ if(_natscpp_use_bundled)
   target_link_libraries(natscpp INTERFACE nats_static)
   set_target_properties(nats_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-  # In the build tree the include/nats/nats.h shim uses #include_next to reach
-  # nats.c's real headers; expose the nats.c src dir so that works.
+  # nats.c's source tree has src/nats.h but no nats/nats.h, which is what
+  # natscpp includes (and what an installed nats.c provides). Generate a
+  # one-line forwarding header in the build tree, naming the bundled header by
+  # absolute path so a system-installed nats.c of another version can't be
+  # picked up instead.
+  set(_natscpp_shim_dir "${CMAKE_CURRENT_BINARY_DIR}/natscpp-bundled-include")
+  file(CONFIGURE OUTPUT "${_natscpp_shim_dir}/nats/nats.h"
+    CONTENT "#pragma once\n#include \"${NATS_C_SOURCE_DIR}/src/nats.h\"\n")
   target_include_directories(natscpp
-    INTERFACE $<BUILD_INTERFACE:${NATS_C_SOURCE_DIR}/src>)
+    INTERFACE $<BUILD_INTERFACE:${_natscpp_shim_dir}>)
 
   # Restore the user's preference now that the nats.c subdir is done.
   set(BUILD_TESTING "${_natscpp_build_testing}" CACHE BOOL "" FORCE)
@@ -153,9 +159,18 @@ if(BUILD_TESTING)
     tests/unit_tests_core.cpp
     tests/unit_tests_api_surface.cpp
     tests/unit_tests_integration.cpp
+    tests/unit_tests_server_features.cpp
+    tests/unit_tests_tls_auth.cpp
   )
   target_link_libraries(natscpp_unit_tests PRIVATE natscpp::natscpp)
-  add_test(NAME natscpp_unit_tests COMMAND natscpp_unit_tests)
+  if(OpenSSL_FOUND)
+    target_link_libraries(natscpp_unit_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto)  # TLS test callback
+  endif()
+  # Server-backed groups skip when no server is reachable, unless NATSCPP_REQUIRE_SERVER is set
+  # (tests/ci/start-servers.sh starts the servers and prints the variables they need).
+  add_test(NAME natscpp_unit        COMMAND natscpp_unit_tests unit)
+  add_test(NAME natscpp_integration COMMAND natscpp_unit_tests integration)
+  add_test(NAME natscpp_tls_auth    COMMAND natscpp_unit_tests tls)
 endif()
 
 # ── Examples ────────────────────────────────────────────────────────────────
@@ -199,8 +214,7 @@ endif()
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-# Install only natscpp's own headers.  The include/nats/nats.h shim is a
-# build-tree-only convenience; installing it would shadow nats.c's real header.
+# Install only natscpp's own headers.
 install(DIRECTORY include/natscpp
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
