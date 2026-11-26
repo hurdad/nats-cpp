@@ -762,9 +762,26 @@ void test_certificate_chain_without_key_is_rejected() {
 
 namespace unit_tests {
 
+namespace {
+void test_tls_option_setters_store_values() {
+  natscpp::connection_options o;
+  o.load_ca_trusted_certificates("ca.pem");
+  o.set_ca_certs_path("/etc/ca");
+  o.load_certificates_chain("cert.pem", "key.pem");
+  o.set_skip_server_verification(true);
+  o.set_expected_hostname("nats.example");
+  assert(o.ca_trusted_certificates_file == "ca.pem");
+  assert(o.ca_certs_path == "/etc/ca");
+  assert(o.certificates_chain_file == "cert.pem" && o.private_key_file == "key.pem");
+  assert(o.skip_server_verification);
+  assert(o.expected_hostname == "nats.example");
+}
+}  // namespace
+
 std::vector<test_case> core_unit_tests() {
   return {
       NATSCPP_TEST_CASE("unit", test_throw_on_error_ok_does_not_throw),
+      NATSCPP_TEST_CASE("unit", test_tls_option_setters_store_values),
       NATSCPP_TEST_CASE("unit", test_throw_on_error_reports_status_and_context),
       NATSCPP_TEST_CASE("unit", test_throw_on_error_preserves_status_code),
       NATSCPP_TEST_CASE("unit", test_header_wrappers),

@@ -12,6 +12,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <cstdlib>
 #include <future>
 #include <optional>
 #include <string>
@@ -123,6 +124,22 @@ void test_sign_rejects_embedded_nul() {
                                     &len);
          }) == NATS_INVALID_ARG);
   assert(sig == nullptr);
+}
+
+// The reply subject of a message built from a raw natsMsg is checked too, and valid input still signs.
+void test_raw_message_reply_and_sign_ok() {
+  natsMsg* raw = nullptr;
+  assert(::nats_Open(-1) == NATS_OK);
+  assert(natsMsg_Create(&raw, "sec.ok", injection.c_str(), "x", 1) == NATS_OK);
+  const natscpp::message msg{raw};
+  assert(status_of([&] { natscpp::detail::check_outgoing(msg, "test"); }) == NATS_INVALID_SUBJECT);
+  assert(status_of([] { natscpp::detail::check_outgoing(natscpp::message{}, "test"); }) == NATS_INVALID_ARG);
+
+  unsigned char* sig = nullptr;
+  int len = 0;
+  // Not a valid seed: nats.c reports an error, but the input reached it.
+  assert(natscpp::nats_Sign("not-a-seed", "nonce", &sig, &len) != NATS_OK);
+  std::free(sig);
 }
 
 std::optional<natscpp::connection> connect_or_skip(std::string_view what) {
@@ -241,6 +258,7 @@ std::vector<test_case> security_unit_tests() {
       NATSCPP_TEST_CASE("unit", test_header_and_c_string_validation_rules),
       NATSCPP_TEST_CASE("unit", test_messages_and_headers_reject_injection),
       NATSCPP_TEST_CASE("unit", test_sign_rejects_embedded_nul),
+      NATSCPP_TEST_CASE("unit", test_raw_message_reply_and_sign_ok),
   };
 }
 

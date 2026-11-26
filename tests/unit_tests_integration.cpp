@@ -985,6 +985,28 @@ void test_publish_empty_payload_roundtrip_if_server_available() {
   assert(received.data().empty());
 }
 
+void test_connection_drain_if_server_available() {
+  for (const bool with_timeout : {false, true}) {
+    natscpp::connection nc;
+    try {
+      nc.connect();
+    } catch (const natscpp::nats_error&) {
+      unit_tests::skip("connection drain (NATS server unavailable)");
+      return;
+    }
+    if (with_timeout) {
+      nc.drain(std::chrono::seconds(2));
+    } else {
+      nc.drain();
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!nc.is_closed() && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    assert(nc.is_closed());
+  }
+}
+
 }  // namespace
 
 namespace unit_tests {
@@ -996,6 +1018,7 @@ std::vector<test_case> integration_tests() {
       NATSCPP_TEST_CASE("integration", test_publish_request_variants_if_server_available),
       NATSCPP_TEST_CASE("integration", test_queue_subscription_if_server_available),
       NATSCPP_TEST_CASE("integration", test_subscription_drain_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_connection_drain_if_server_available),
       NATSCPP_TEST_CASE("integration", test_jetstream_consumer_group_crud_if_server_available),
       NATSCPP_TEST_CASE("integration", test_kv_bucket_and_key_crud_if_server_available),
       NATSCPP_TEST_CASE("integration", test_kv_put_erase_and_entry_fields_if_server_available),
