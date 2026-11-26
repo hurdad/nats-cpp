@@ -583,9 +583,7 @@ void test_message_binary_payload_with_null_bytes() {
   natscpp::message msg{raw};
   assert(msg.valid());
   assert(msg.data().size() == 5);
-  assert(msg.data()[0] == '\x00');
-  assert(msg.data()[2] == static_cast<char>('\xFF'));
-  assert(msg.data()[4] == static_cast<char>('\xAB'));
+  assert(msg.data() == std::string_view(binary, sizeof(binary)));  // embedded NULs preserved
 }
 
 // ---------------------------------------------------------------------------

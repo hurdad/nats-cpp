@@ -63,7 +63,9 @@ void test_connection_has_sync_and_async_apis() {
   static_assert(requires { nc.request_async("svc", "payload"); });
   static_assert(requires(natscpp::connection_options opts, natsSignatureHandler sig_cb, void* closure,
                          std::function<void(natsConnection*)> conn_cb,
-                         std::function<void(natsConnection*, natsSubscription*, natsStatus)> err_cb) {
+                         std::function<void(natsConnection*, natsSubscription*, natsStatus)> err_cb,
+                         // A parameter, not a lambda: GCC 13 cannot parse `[](natsOptions*) {}` in a requires.
+                         std::function<void(natsOptions*)> customize_cb) {
     opts.set_token("token");
     opts.set_nkey("PUB", sig_cb, closure);
     opts.set_user_credentials_from_files("user.creds", "seed.txt");
@@ -83,7 +85,7 @@ void test_connection_has_sync_and_async_apis() {
     opts.set_timeout(std::chrono::seconds(2));
     opts.set_name("cpp-client");
     opts.set_no_echo(true);
-    opts.set_customize_options([](natsOptions*) {});
+    opts.set_customize_options(customize_cb);
   });
 #if NATS_VERSION_NUMBER >= 0x030A00
   static_assert(requires(natscpp::connection_options opts, natsSSLVerifyCb cb) {

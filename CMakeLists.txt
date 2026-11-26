@@ -179,8 +179,10 @@ endif()
 set(_natscpp_warnings)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   set(_natscpp_warnings -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align
-                        -Woverloaded-virtual -Wnull-dereference -Wimplicit-fallthrough
+                        -Woverloaded-virtual -Wimplicit-fallthrough
                         -Wno-missing-field-initializers)  # designated initializers leave the rest defaulted
+  # Not -Wnull-dereference: its -O2 analysis changes between GCC versions and reports false positives
+  # (GCC 13 flags indexing a string_view after checking its size). ASan/UBSan catch real null dereferences.
   if(NATSCPP_WARNINGS_AS_ERRORS)
     list(APPEND _natscpp_warnings -Werror)
   endif()

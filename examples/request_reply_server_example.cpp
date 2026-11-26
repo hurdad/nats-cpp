@@ -10,8 +10,9 @@
 #include "example_common.hpp"
 
 namespace {
-std::atomic<bool> stop_requested{
-    false};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables): set by the signal handler
+// Set by the signal handler, so it has to be a global.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<bool> stop_requested{false};
 extern "C" void on_signal(int) { stop_requested = true; }
 }  // namespace
 

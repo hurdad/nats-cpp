@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -328,14 +329,79 @@ void test_connection_state_and_header_support() {
 void test_rarely_used_connection_options_are_accepted() {
   natscpp::connection_options opts;
   opts.set_token("ignored-by-a-server-without-auth");
-  opts.set_secure(false);  // opt out of the TLS requirement the next two would add
-  opts.set_expected_hostname("localhost");
-  opts.set_ciphers("HIGH:!aNULL");
   opts.set_lame_duck_mode_cb([](natsConnection*) {});
   opts.set_discovered_servers_cb([](natsConnection*) {});
   auto nc = connect_or_skip("rarely used connection options", opts);
   if (!nc) return;
   assert(nc->connected());
+
+  // TLS options on a plain connection: accepted with secure = false when nats.c has TLS; a nats.c built
+  // without TLS rejects them before connecting.
+  natscpp::connection_options tls_opts;
+  tls_opts.set_secure(false);  // opt out of the TLS requirement the next two would add
+  tls_opts.set_expected_hostname("localhost");
+  tls_opts.set_ciphers("HIGH:!aNULL");
+#ifdef NATS_HAS_TLS
+  natscpp::connection tls_nc(tls_opts);
+  assert(tls_nc.connected());
+#else
+  assert(status_of([&] { natscpp::connection tls_nc(tls_opts); }) == NATS_ILLEGAL_STATE);
+#endif
+}
+
+// Exceptions from connection callbacks are caught at the C boundary: the connection keeps working and the
+// remaining callbacks, including the closed callback that frees the handlers, still run.
+void test_throwing_connection_callbacks_are_contained() {
+  using namespace std::chrono_literals;
+  auto reconnected = std::make_shared<std::promise<void>>();
+  auto slow = std::make_shared<std::promise<void>>();
+  auto closed = std::make_shared<std::promise<void>>();
+  auto reconnected_f = reconnected->get_future();
+  auto slow_f = slow->get_future();
+  auto closed_f = closed->get_future();
+
+  natscpp::connection_options opts;
+  opts.set_reconnect_wait(50ms);
+  opts.set_reconnect_jitter(0, 0);
+  opts.set_disconnected_cb([](natsConnection*) { throw std::runtime_error("disconnected"); });
+  opts.set_reconnected_cb([reconnected, once = std::make_shared<std::once_flag>()](natsConnection*) {
+    std::call_once(*once, [&] { reconnected->set_value(); });
+    throw std::runtime_error("reconnected");
+  });
+  opts.set_error_handler(
+      [slow, once = std::make_shared<std::once_flag>()](natsConnection*, natsSubscription*, natsStatus) {
+        std::call_once(*once, [&] { slow->set_value(); });
+        throw std::runtime_error("error handler");
+      });
+  opts.set_closed_cb([closed](natsConnection*) {
+    closed->set_value();
+    throw std::runtime_error("closed");
+  });
+  auto nc = connect_or_skip("throwing connection callbacks", opts);
+  if (!nc) return;
+
+  nc->reconnect();  // disconnected + reconnected callbacks, both throwing
+  assert(reconnected_f.wait_for(5s) == std::future_status::ready);
+
+  // A slow consumer makes nats.c call the error handler.
+  const std::string subj = unique("natscpp.throwcb.");
+  std::promise<void> release;
+  auto release_f = release.get_future().share();
+  auto sub = nc->subscribe_async(subj, [release_f](natscpp::message) { release_f.wait_for(5s); });
+  sub.set_pending_limits(1, 1024);
+  for (int i = 0; i < 50; ++i) nc->publish(subj, "x");
+  nc->flush(2s);
+  assert(slow_f.wait_for(5s) == std::future_status::ready);
+  release.set_value();
+  sub.unsubscribe();
+
+  // Still usable after every callback threw.
+  auto check = nc->subscribe_sync(subj + ".ok");
+  nc->publish(subj + ".ok", "alive");
+  assert(check.next_message(2s).data() == "alive");
+
+  nc->close();
+  assert(closed_f.wait_for(5s) == std::future_status::ready);
 }
 
 // A request to a subject nobody listens on comes back as a no-responders status message. A sync subscription
@@ -548,6 +614,7 @@ void run_server_regression_tests() {
   test_failed_connect_frees_handlers();
   test_connection_state_and_header_support();
   test_rarely_used_connection_options_are_accepted();
+  test_throwing_connection_callbacks_are_contained();
   test_no_responders_message();
   test_async_timeout_subscription_ignores_timeouts();
   test_jetstream_validation_and_options();
