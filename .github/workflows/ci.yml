@@ -120,6 +120,10 @@ jobs:
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:suppressions=${{ github.workspace }}/tests/ci/tsan.supp
         run: ctest --test-dir build --output-on-failure --output-junit junit.xml ${{ matrix.ctest_args }}
 
+      - name: Name test results by group
+        if: ${{ !cancelled() }}
+        run: tests/ci/junit-group-classnames.sh build/junit.xml
+
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}   # failed runs are the ones worth seeing
         uses: codecov/codecov-action@v5
