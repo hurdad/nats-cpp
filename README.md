@@ -674,6 +674,11 @@ natscpp::message reply = co_await nc.request_awaitable("svc.echo", "ping");  // 
 The coroutine resumes on a background thread (one per suspension), so this suits occasional requests, not
 high-rate traffic. The awaitable is move-only.
 
+Because of that, the coroutine type should start suspended (`initial_suspend` returning `std::suspend_always`)
+and be resumed once the call that created it has returned. A coroutine that starts running inside its own
+call can be resumed, finished and freed by the background thread while the caller is still returning from
+that call, which is a data race on the coroutine frame (ThreadSanitizer reports it with GCC 15).
+
 ### Library utilities
 
 `library.hpp` exposes thin wrappers around global nats.c functions.
