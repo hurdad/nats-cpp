@@ -3,7 +3,8 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/hurdad/nats-cpp/ci.yml?branch=main&logo=github&label=CI)](https://github.com/hurdad/nats-cpp/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/hurdad/nats-cpp/branch/main/graph/badge.svg)](https://codecov.io/gh/hurdad/nats-cpp)
 
-Modern, header-only **C++20** wrappers for the official [`nats.c`](https://github.com/nats-io/nats.c) client.
+Modern, header-only **C++20/C++23** wrappers for the official [`nats.c`](https://github.com/nats-io/nats.c)
+client: core NATS, JetStream and KeyValue, with RAII handles and sync, callback and coroutine APIs.
 
 ## Table of contents
 
@@ -48,8 +49,8 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
 
 ## Requirements
 
-- C++20 or C++23 compiler. CI builds with GCC and Clang in both modes; the library only needs C++20, and a
-  project compiling as C++23 can use it unchanged.
+- C++20 or C++23 compiler. CI builds with GCC as C++20 and C++23 and with Clang as C++23; the library only
+  needs C++20, and a project compiling as C++23 can use it unchanged.
 - CMake 3.20+
 - `nats.c` dependency, resolved in one of two ways:
   - bundled submodule at `third_party/nats.c` (static build wired automatically by CMake), or
@@ -228,6 +229,10 @@ Request/reply example is available in:
 
 `connection_options` is a plain struct — set fields directly or via convenience setters before passing to the `connection` constructor.
 
+Designated initializers such as `connection nc({.url = "..."})` leave every other field at its default, which
+is what you want; GCC's `-Wmissing-field-initializers` (part of `-Wextra`) still warns about them. natscpp
+builds its own tests and examples with `-Wno-missing-field-initializers`; do the same, or use the setters.
+
 **Authentication**
 
 | Field / setter | Description |
@@ -331,6 +336,10 @@ opts.set_ssl_verification_callback(&pin_issuer);
 | `new_inbox()` | Generate a unique reply-to inbox subject (static) |
 | `buffered_bytes()` | Bytes pending in outgoing buffer |
 | `is_reconnecting()`, `is_draining()` | Connection state predicates |
+
+**Connection control:** `flush()` / `flush(timeout)` waits until the server has processed everything sent so
+far; `reconnect()` drops the connection and reconnects; `drain()` / `drain(timeout)` drains every
+subscription, then closes; `close()` closes immediately. Destroying a `connection` closes it too.
 
 ### Message
 
@@ -611,7 +620,7 @@ natscpp::kv_watch_options watch_opts;
 watch_opts.updates_only = true;
 auto watcher = kv.watch("user-1", &watch_opts);
 
-kv.put("user-1", R"({"name":"Ada","active":true})");
+(void)kv.put("user-1", R"({"name":"Ada","active":true})");
 auto updated = watcher.next(1000);  // timeout in milliseconds; next() with no argument blocks until an entry or stop()
 watcher.stop();
 
@@ -625,7 +634,7 @@ Watch APIs:
 - `watch_all(opts)` for all keys in the bucket
 
 `kv_watcher::next()` takes a timeout in milliseconds and throws `NATS_TIMEOUT` when it expires; without an
-argument it blocks until an entry arrives or the watcher is stopped. Unless `updates_only` is set, a watcher
+argument it blocks until an entry arrives, and throws if the watcher is stopped meanwhile. Unless `updates_only` is set, a watcher
 first delivers the current value of every matching key, then **one invalid entry** (`entry.valid() == false`)
 marking the end of that snapshot, then live updates — so check `valid()` before using an entry.
 
@@ -697,7 +706,7 @@ that call, which is a data race on the coroutine frame (ThreadSanitizer reports 
 // Verify header/library version compatibility (call before anything else).
 bool ok = natscpp::nats_CheckCompatibility();
 
-// Initialize the library (optional — nats.c does this lazily on first connect).
+// Initialize the library (optional: connecting and message::create() do it when needed).
 natscpp::nats_Open(-1);
 
 // Clean up all library resources at exit (call one of these, once, after every natscpp object is gone).
@@ -777,7 +786,10 @@ Locally:
 ```bash
 clang-format -i $(git ls-files '*.hpp' '*.cpp' ':!:third_party')     # format
 cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && run-clang-tidy -p build tests/ examples/
-cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DNATSCPP_NATS_BACKEND=bundled \
   -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
   -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+cmake --build build-asan
+# The suppressions cover a leak inside nats.c itself (see the file); without them the KV tests fail.
+LSAN_OPTIONS=suppressions=$PWD/tests/ci/lsan.supp ctest --test-dir build-asan --output-on-failure
 ```
