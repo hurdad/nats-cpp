@@ -3,6 +3,8 @@
 
 #include "unit_tests.hpp"
 
+#include <vector>
+
 #include <natscpp/awaitable.hpp>
 #include <natscpp/connection.hpp>
 #include <natscpp/jetstream.hpp>
@@ -987,31 +989,34 @@ void test_publish_empty_payload_roundtrip_if_server_available() {
 
 namespace unit_tests {
 
-void run_integration_tests() {
-  test_connection_state_accessors_if_server_available();
-  test_connection_sync_and_async_roundtrip_if_server_available();
-  test_publish_request_variants_if_server_available();
-  test_queue_subscription_if_server_available();
-  test_subscription_drain_if_server_available();
-  test_jetstream_consumer_group_crud_if_server_available();
-  test_kv_bucket_and_key_crud_if_server_available();
-  test_kv_put_erase_and_entry_fields_if_server_available();
-  test_kv_watchers_if_server_available();
-  test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_available();
-  test_publish_message_overload_if_server_available();
-  test_subscribe_async_timeout_if_server_available();
-  test_subscribe_queue_sync_and_queue_async_timeout_if_server_available();
-  test_subscription_on_complete_callback_if_server_available();
-  test_request_awaitable_if_server_available();
-  test_key_value_open_constructor_and_full_config_if_server_available();
-  test_key_value_keys_with_filters_if_server_available();
-  test_key_value_history_and_purge_deletes_if_server_available();
-  test_jetstream_stream_management_if_server_available();
-  test_jetstream_stream_msg_access_if_server_available();
-  test_jetstream_publish_msg_and_account_info_if_server_available();
-  test_kv_optimistic_lock_conflict_if_server_available();
-  test_request_no_responders_if_server_available();
-  test_publish_empty_payload_roundtrip_if_server_available();
+std::vector<test_case> integration_tests() {
+  return {
+      NATSCPP_TEST_CASE("integration", test_connection_state_accessors_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_connection_sync_and_async_roundtrip_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_publish_request_variants_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_queue_subscription_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_subscription_drain_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_jetstream_consumer_group_crud_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_kv_bucket_and_key_crud_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_kv_put_erase_and_entry_fields_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_kv_watchers_if_server_available),
+      NATSCPP_TEST_CASE("integration",
+                        test_jetstream_publish_subscribe_ack_and_subscription_helpers_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_publish_message_overload_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_subscribe_async_timeout_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_subscribe_queue_sync_and_queue_async_timeout_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_subscription_on_complete_callback_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_request_awaitable_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_key_value_open_constructor_and_full_config_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_key_value_keys_with_filters_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_key_value_history_and_purge_deletes_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_jetstream_stream_management_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_jetstream_stream_msg_access_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_jetstream_publish_msg_and_account_info_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_kv_optimistic_lock_conflict_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_request_no_responders_if_server_available),
+      NATSCPP_TEST_CASE("integration", test_publish_empty_payload_roundtrip_if_server_available),
+  };
 }
 
 }  // namespace unit_tests

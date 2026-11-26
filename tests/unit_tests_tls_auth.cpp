@@ -3,6 +3,8 @@
 
 #include "unit_tests.hpp"
 
+#include <vector>
+
 #include <natscpp/connection.hpp>
 
 #include <cassert>
@@ -178,17 +180,25 @@ void test_tls_chain_verification_and_issuer_pinning() {
 }
 #endif  // NATSCPP_TEST_TLS
 
+#ifndef NATSCPP_TEST_TLS
+void test_tls_chain_verification_unavailable() {
+  unit_tests::skip("TLS checks (nats.c built without TLS, or OpenSSL headers missing)");
+}
+#endif
+
 }  // namespace
 
 namespace unit_tests {
 
-void run_tls_and_auth_tests() {
-  test_user_password_auth();
+std::vector<test_case> tls_and_auth_tests() {
+  return {
+      NATSCPP_TEST_CASE("tls", test_user_password_auth),
 #ifdef NATSCPP_TEST_TLS
-  test_tls_chain_verification_and_issuer_pinning();
+      NATSCPP_TEST_CASE("tls", test_tls_chain_verification_and_issuer_pinning),
 #else
-  unit_tests::skip("TLS checks (nats.c built without TLS, or OpenSSL headers missing)");
+      NATSCPP_TEST_CASE("tls", test_tls_chain_verification_unavailable),
 #endif
+  };
 }
 
 }  // namespace unit_tests

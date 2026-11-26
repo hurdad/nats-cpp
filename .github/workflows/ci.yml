@@ -68,7 +68,7 @@ jobs:
             cxx: g++
             std: 20
             cmake_args: -DNATSCPP_BUNDLED_WITH_TLS=OFF
-            ctest_args: -E natscpp_tls_auth   # TLS tests need a TLS-enabled nats.c
+            ctest_args: -LE tls   # TLS tests need a TLS-enabled nats.c
           - name: coverage
             build_type: Debug
             cxx: g++

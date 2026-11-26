@@ -3,6 +3,8 @@
 ## 0.2.0
 
 ### Fixed
+- `message::create()` before any connection crashed when the message was destroyed: nats.c frees messages
+  through its library state, which only opening a connection initialized. `create()` now opens the library.
 - **Use-after-free in async subscriptions.** Destroying, move-assigning or unsubscribing a `subscription`
   freed its handler even while nats.c was still running it on its delivery thread, including when a handler
   unsubscribed itself. The handler now stays alive until nats.c reports the subscription complete.
@@ -29,6 +31,8 @@
 - Input checks: setting both `filter_subject` and `filter_subjects`; JetStream and KV payloads over `INT_MAX`.
 - Examples: queue groups, headers and trace propagation, lifecycle callbacks and drain, TLS/auth, coroutines.
   All examples read `$NATS_URL`, check their results, report errors, and clean up after themselves.
+- Each test function is its own CTest test (`<group>.<name>`, labelled `unit`/`integration`/`tls`, run in
+  its own process), so CI and Codecov report results per test; unreachable servers show as skipped.
 - CI: TSan, Clang, C++23, warnings as errors, clang-format, clang-tidy, shellcheck, actionlint, install and
   `add_subdirectory` consumers, example runs, coverage thresholds, and test results on Codecov.
 

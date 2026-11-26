@@ -72,6 +72,7 @@ void test_header_wrappers() {
 void test_message_accessors_and_headers() {
   natsMsg* raw = nullptr;
   const char payload[] = "hello";
+  assert(natscpp::nats_Open(-1) == NATS_OK);  // raw nats.c messages need the library open to be freed
   assert(natsMsg_Create(&raw, "subject.a", "reply.b", payload, static_cast<int>(sizeof(payload) - 1)) == NATS_OK);
 
   natscpp::message msg{raw};
@@ -579,6 +580,7 @@ void test_message_empty_payload() {
 void test_message_binary_payload_with_null_bytes() {
   const char binary[] = {'\x00', '\x01', '\xFF', '\x00', '\xAB'};
   natsMsg* raw = nullptr;
+  assert(natscpp::nats_Open(-1) == NATS_OK);  // raw nats.c messages need the library open to be freed
   assert(natsMsg_Create(&raw, "bin.subj", nullptr, binary, static_cast<int>(sizeof(binary))) == NATS_OK);
   natscpp::message msg{raw};
   assert(msg.valid());
@@ -762,46 +764,48 @@ void test_certificate_chain_without_key_is_rejected() {
 
 namespace unit_tests {
 
-void run_core_unit_tests() {
-  test_throw_on_error_ok_does_not_throw();
-  test_throw_on_error_reports_status_and_context();
-  test_throw_on_error_preserves_status_code();
-  test_header_wrappers();
-  test_message_accessors_and_headers();
-  test_message_default_constructor_null_guards();
-  test_message_create_factory();
-  test_message_release_transfers_ownership();
-  test_future_awaitable_ready_and_resume();
-  test_jetstream_and_consumers_move_semantics_on_empty_handles();
-  test_subscription_release_callback_lifecycle();
-  test_subscription_default_constructor();
-  test_subscription_requires_valid_handle_for_stateful_operations();
-  test_new_inbox_generates_unique_subjects();
-  test_trace_carrier_concept_and_helpers();
-  test_message_trace_carrier_reads_and_writes_headers();
-  test_header_default_state_release_and_reset();
-  test_jetstream_null_ctx_throws();
-  test_jetstream_consumer_config_validation_guards();
-  test_js_pull_consumer_null_guard();
-  test_js_push_consumer_null_guard();
-  test_kv_entry_null_guards();
-  test_kv_watcher_null_guards();
-  test_key_value_null_guards();
-  test_header_null_handle_throws();
-  test_publish_oversized_payload_throws();
-  test_message_empty_payload();
-  test_message_binary_payload_with_null_bytes();
-  test_library_version_and_time_functions();
-  test_future_awaitable_suspend_resumes_via_noop_handle();
-  test_future_awaitable_destroyed_before_future_ready();
+std::vector<test_case> core_unit_tests() {
+  return {
+      NATSCPP_TEST_CASE("unit", test_throw_on_error_ok_does_not_throw),
+      NATSCPP_TEST_CASE("unit", test_throw_on_error_reports_status_and_context),
+      NATSCPP_TEST_CASE("unit", test_throw_on_error_preserves_status_code),
+      NATSCPP_TEST_CASE("unit", test_header_wrappers),
+      NATSCPP_TEST_CASE("unit", test_message_accessors_and_headers),
+      NATSCPP_TEST_CASE("unit", test_message_default_constructor_null_guards),
+      NATSCPP_TEST_CASE("unit", test_message_create_factory),
+      NATSCPP_TEST_CASE("unit", test_message_release_transfers_ownership),
+      NATSCPP_TEST_CASE("unit", test_future_awaitable_ready_and_resume),
+      NATSCPP_TEST_CASE("unit", test_jetstream_and_consumers_move_semantics_on_empty_handles),
+      NATSCPP_TEST_CASE("unit", test_subscription_release_callback_lifecycle),
+      NATSCPP_TEST_CASE("unit", test_subscription_default_constructor),
+      NATSCPP_TEST_CASE("unit", test_subscription_requires_valid_handle_for_stateful_operations),
+      NATSCPP_TEST_CASE("unit", test_new_inbox_generates_unique_subjects),
+      NATSCPP_TEST_CASE("unit", test_trace_carrier_concept_and_helpers),
+      NATSCPP_TEST_CASE("unit", test_message_trace_carrier_reads_and_writes_headers),
+      NATSCPP_TEST_CASE("unit", test_header_default_state_release_and_reset),
+      NATSCPP_TEST_CASE("unit", test_jetstream_null_ctx_throws),
+      NATSCPP_TEST_CASE("unit", test_jetstream_consumer_config_validation_guards),
+      NATSCPP_TEST_CASE("unit", test_js_pull_consumer_null_guard),
+      NATSCPP_TEST_CASE("unit", test_js_push_consumer_null_guard),
+      NATSCPP_TEST_CASE("unit", test_kv_entry_null_guards),
+      NATSCPP_TEST_CASE("unit", test_kv_watcher_null_guards),
+      NATSCPP_TEST_CASE("unit", test_key_value_null_guards),
+      NATSCPP_TEST_CASE("unit", test_header_null_handle_throws),
+      NATSCPP_TEST_CASE("unit", test_publish_oversized_payload_throws),
+      NATSCPP_TEST_CASE("unit", test_message_empty_payload),
+      NATSCPP_TEST_CASE("unit", test_message_binary_payload_with_null_bytes),
+      NATSCPP_TEST_CASE("unit", test_library_version_and_time_functions),
+      NATSCPP_TEST_CASE("unit", test_future_awaitable_suspend_resumes_via_noop_handle),
+      NATSCPP_TEST_CASE("unit", test_future_awaitable_destroyed_before_future_ready),
 #if NATS_VERSION_NUMBER >= 0x030A00
-  test_ssl_verification_callback_setter_stores_pointer();
-  test_ssl_verification_callback_is_applied_before_customize_options();
+      NATSCPP_TEST_CASE("unit", test_ssl_verification_callback_setter_stores_pointer),
+      NATSCPP_TEST_CASE("unit", test_ssl_verification_callback_is_applied_before_customize_options),
 #endif
-  test_customize_options_runs_last_and_propagates_exceptions();
-  test_moved_from_connection_subscribe_async_throws();
-  test_kv_config_history_out_of_range_throws();
-  test_certificate_chain_without_key_is_rejected();
+      NATSCPP_TEST_CASE("unit", test_customize_options_runs_last_and_propagates_exceptions),
+      NATSCPP_TEST_CASE("unit", test_moved_from_connection_subscribe_async_throws),
+      NATSCPP_TEST_CASE("unit", test_kv_config_history_out_of_range_throws),
+      NATSCPP_TEST_CASE("unit", test_certificate_chain_without_key_is_rejected),
+  };
 }
 
 }  // namespace unit_tests

@@ -65,9 +65,17 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The `unit` test group needs no server. The `integration` and `tls` groups need nats-servers, and **skip
-silently** when none is reachable. To run everything, start the same servers CI uses (needs `nats-server` and
-`openssl`; set `NATS_SERVER` to use another binary):
+Every test function is its own CTest test, named `<group>.<name>` (e.g. `unit.header_wrappers`) and
+labelled with its group:
+
+- `unit` needs no server: `ctest --test-dir build -L unit`
+- `integration` needs a nats-server with JetStream at `nats://127.0.0.1:4222`
+- `tls` needs the TLS and auth servers that `tests/ci/start-servers.sh` describes
+
+Server tests show as **skipped** when their server is unreachable. Each test runs in a fresh process; to run
+one directly, use `build/natscpp_unit_tests <group>.<name>` (`--list` prints them all, and a group name or
+`all` runs several in one process). To run everything, start the same servers CI uses (needs `nats-server`
+and `openssl`; set `NATS_SERVER` to use another binary):
 
 ```bash
 eval "$(tests/ci/start-servers.sh /tmp/natscpp-servers | sed 's/^/export /')"

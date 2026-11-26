@@ -209,11 +209,22 @@ if(NATSCPP_BUILD_TESTS)
   if(OpenSSL_FOUND)
     target_link_libraries(natscpp_unit_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto)  # TLS test callback
   endif()
-  # Server-backed groups skip when no server is reachable, unless NATSCPP_REQUIRE_SERVER is set
-  # (tests/ci/start-servers.sh starts the servers and prints the variables they need).
-  add_test(NAME natscpp_unit        COMMAND natscpp_unit_tests unit)
-  add_test(NAME natscpp_integration COMMAND natscpp_unit_tests integration)
-  add_test(NAME natscpp_tls_auth    COMMAND natscpp_unit_tests tls)
+  # One CTest test per test function, named <group>.<name> and labelled with its group (unit, integration,
+  # tls); `ctest -L unit` runs only the tests that need no server. The list comes from the built binary
+  # (natscpp_unit_tests --list), like gtest_discover_tests. Server tests report "skipped" when their server
+  # is unreachable, or fail with NATSCPP_REQUIRE_SERVER set (tests/ci/start-servers.sh starts the servers).
+  set(_natscpp_ctest_file "${CMAKE_CURRENT_BINARY_DIR}/natscpp_unit_tests_list.cmake")
+  add_custom_command(TARGET natscpp_unit_tests POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -DEXE=$<TARGET_FILE:natscpp_unit_tests> -DOUT=${_natscpp_ctest_file}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/discover_tests.cmake"
+    VERBATIM)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/natscpp_unit_tests_include.cmake"
+    "if(EXISTS \"${_natscpp_ctest_file}\")\n"
+    "  include(\"${_natscpp_ctest_file}\")\n"
+    "else()\n"
+    "  add_test(natscpp_unit_tests_NOT_BUILT natscpp_unit_tests_NOT_BUILT)\n"
+    "endif()\n")
+  set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${CMAKE_CURRENT_BINARY_DIR}/natscpp_unit_tests_include.cmake")
 endif()
 
 # ── Examples ────────────────────────────────────────────────────────────────

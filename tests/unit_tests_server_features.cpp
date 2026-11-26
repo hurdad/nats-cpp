@@ -303,16 +303,18 @@ void test_kv_watcher_next_without_timeout_blocks_until_update() {
 
 namespace unit_tests {
 
-void run_server_feature_tests() {
-  test_closed_and_disconnected_callbacks_fire_on_close();
-  test_reconnect_fires_disconnected_and_reconnected_callbacks();
-  test_error_handler_reports_slow_consumer();
-  test_connection_options_are_applied();
-  test_old_request_style_and_connect_to_and_subscribe_queue();
-  test_exception_in_handler_is_contained();
-  test_subscription_move_assign_under_traffic();
-  test_subscription_outlives_connection_object();
-  test_kv_watcher_next_without_timeout_blocks_until_update();
+std::vector<test_case> server_feature_tests() {
+  return {
+      NATSCPP_TEST_CASE("integration", test_closed_and_disconnected_callbacks_fire_on_close),
+      NATSCPP_TEST_CASE("integration", test_reconnect_fires_disconnected_and_reconnected_callbacks),
+      NATSCPP_TEST_CASE("integration", test_error_handler_reports_slow_consumer),
+      NATSCPP_TEST_CASE("integration", test_connection_options_are_applied),
+      NATSCPP_TEST_CASE("integration", test_old_request_style_and_connect_to_and_subscribe_queue),
+      NATSCPP_TEST_CASE("integration", test_exception_in_handler_is_contained),
+      NATSCPP_TEST_CASE("integration", test_subscription_move_assign_under_traffic),
+      NATSCPP_TEST_CASE("integration", test_subscription_outlives_connection_object),
+      NATSCPP_TEST_CASE("integration", test_kv_watcher_next_without_timeout_blocks_until_update),
+  };
 }
 
 }  // namespace unit_tests

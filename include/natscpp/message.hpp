@@ -35,6 +35,10 @@ class message {
   explicit message(natsMsg* raw) : msg_(raw) {}
 
   static message create(std::string_view subject, std::string_view reply_to, std::string_view payload) {
+    // natsMsg_Create works without the library, but destroying the message needs it (nats.c's message
+    // garbage collector), so a message created before any connection would crash when freed. nats_Open is a
+    // no-op once the library is open.
+    throw_on_error(::nats_Open(-1), "nats_Open");
     natsMsg* raw{};
     throw_on_error(
         natsMsg_Create(&raw, std::string(subject).c_str(), reply_to.empty() ? nullptr : std::string(reply_to).c_str(),

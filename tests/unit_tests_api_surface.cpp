@@ -180,6 +180,10 @@ void test_connection_has_sync_and_async_apis() {
 
 namespace unit_tests {
 
-void run_api_surface_unit_tests() { test_connection_has_sync_and_async_apis(); }
+std::vector<test_case> api_surface_unit_tests() {
+  return {
+      NATSCPP_TEST_CASE("unit", test_connection_has_sync_and_async_apis),
+  };
+}
 
 }  // namespace unit_tests

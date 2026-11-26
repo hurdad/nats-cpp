@@ -591,35 +591,50 @@ void test_kv_failure_paths_and_options() {
   natscpp::key_value::delete_bucket(*nc, bucket);
 }
 
+// Regression: message::create before anything had opened the nats.c library made the message crash when it
+// was destroyed (natsMsg_Destroy uses the library's garbage collector). CTest runs this test in its own
+// process, so nothing has opened the library yet.
+void test_message_create_works_before_any_connection() {
+  {
+    auto msg = natscpp::message::create("first.thing", "", "payload");
+    assert(msg.data() == "payload");
+  }  // destroyed here
+}
+
 }  // namespace
 
 namespace unit_tests {
 
-void run_offline_regression_tests() {
-  test_credentials_setter_leaves_seed_unset_by_default();
-  test_error_text_omits_unrelated_last_error();
-  test_future_awaitable_is_move_only();
-  test_compatibility_check_keeps_nats_macro();
-  test_invalid_objects_reject_operations();
-  test_self_move_assignment_is_a_no_op();
-  test_header_errors();
+std::vector<test_case> offline_regression_tests() {
+  return {
+      NATSCPP_TEST_CASE("unit", test_message_create_works_before_any_connection),
+      NATSCPP_TEST_CASE("unit", test_credentials_setter_leaves_seed_unset_by_default),
+      NATSCPP_TEST_CASE("unit", test_error_text_omits_unrelated_last_error),
+      NATSCPP_TEST_CASE("unit", test_future_awaitable_is_move_only),
+      NATSCPP_TEST_CASE("unit", test_compatibility_check_keeps_nats_macro),
+      NATSCPP_TEST_CASE("unit", test_invalid_objects_reject_operations),
+      NATSCPP_TEST_CASE("unit", test_self_move_assignment_is_a_no_op),
+      NATSCPP_TEST_CASE("unit", test_header_errors),
+  };
 }
 
-void run_server_regression_tests() {
-  test_subscription_destroyed_while_handler_runs();
-  test_handler_unsubscribes_itself();
-  test_on_complete_runs_after_subscription_is_gone();
-  test_on_complete_rules();
-  test_closed_callback_after_connection_destroyed();
-  test_failed_connect_frees_handlers();
-  test_connection_state_and_header_support();
-  test_rarely_used_connection_options_are_accepted();
-  test_throwing_connection_callbacks_are_contained();
-  test_no_responders_message();
-  test_async_timeout_subscription_ignores_timeouts();
-  test_jetstream_validation_and_options();
-  test_jetstream_pull_fetch_and_async_subscribe();
-  test_kv_failure_paths_and_options();
+std::vector<test_case> server_regression_tests() {
+  return {
+      NATSCPP_TEST_CASE("integration", test_subscription_destroyed_while_handler_runs),
+      NATSCPP_TEST_CASE("integration", test_handler_unsubscribes_itself),
+      NATSCPP_TEST_CASE("integration", test_on_complete_runs_after_subscription_is_gone),
+      NATSCPP_TEST_CASE("integration", test_on_complete_rules),
+      NATSCPP_TEST_CASE("integration", test_closed_callback_after_connection_destroyed),
+      NATSCPP_TEST_CASE("integration", test_failed_connect_frees_handlers),
+      NATSCPP_TEST_CASE("integration", test_connection_state_and_header_support),
+      NATSCPP_TEST_CASE("integration", test_rarely_used_connection_options_are_accepted),
+      NATSCPP_TEST_CASE("integration", test_throwing_connection_callbacks_are_contained),
+      NATSCPP_TEST_CASE("integration", test_no_responders_message),
+      NATSCPP_TEST_CASE("integration", test_async_timeout_subscription_ignores_timeouts),
+      NATSCPP_TEST_CASE("integration", test_jetstream_validation_and_options),
+      NATSCPP_TEST_CASE("integration", test_jetstream_pull_fetch_and_async_subscribe),
+      NATSCPP_TEST_CASE("integration", test_kv_failure_paths_and_options),
+  };
 }
 
 }  // namespace unit_tests
