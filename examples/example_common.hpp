@@ -2,6 +2,7 @@
 
 // Shared by the examples: where the server is, and turning errors into a message and exit code 1.
 
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -9,6 +10,7 @@
 #include <utility>
 
 #include <natscpp/error.hpp>
+#include <natscpp/library.hpp>
 
 namespace example {
 
@@ -18,21 +20,29 @@ inline std::string server_url() {
   return url != nullptr && *url != '\0' ? std::string{url} : std::string{"nats://127.0.0.1:4222"};
 }
 
-// Runs body() and reports any exception instead of letting it terminate the program.
+// Runs body() and reports any exception instead of letting it terminate the program. Then waits for nats.c's
+// threads: a destroyed connection is closed in the background, and exiting while that thread still runs (for
+// example inside OpenSSL, which tears down its globals at exit) can crash.
 template <typename Body>
 int run(Body&& body) {
-  try {
-    return std::forward<Body>(body)();
-  } catch (const natscpp::nats_error& e) {
-    std::cerr << "error: " << e.what() << '\n';
-    if (e.status() == NATS_NO_SERVER) {
-      std::cerr << "hint: start a server (e.g. `nats-server -js`) or set NATS_URL\n";
+  const int rc = [&]() -> int {
+    try {
+      return std::forward<Body>(body)();  // every natscpp object the body created is destroyed on return
+    } catch (const natscpp::nats_error& e) {
+      std::cerr << "error: " << e.what() << '\n';
+      if (e.status() == NATS_NO_SERVER) {
+        std::cerr << "hint: start a server (e.g. `nats-server -js`) or set NATS_URL\n";
+      }
+      return 1;
+    } catch (const std::exception& e) {
+      std::cerr << "error: " << e.what() << '\n';
+      return 1;
     }
-    return 1;
-  } catch (const std::exception& e) {
-    std::cerr << "error: " << e.what() << '\n';
-    return 1;
+  }();
+  if (const natsStatus s = natscpp::nats_CloseAndWait(std::chrono::seconds(5)); s != NATS_OK) {
+    std::cerr << "warning: nats.c did not shut down cleanly: " << natsStatus_GetText(s) << '\n';
   }
+  return rc;
 }
 
 // Runs a cleanup action when the scope ends, also on an exception (e.g. deleting a demo stream).

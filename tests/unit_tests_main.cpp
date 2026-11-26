@@ -1,5 +1,9 @@
 #include "unit_tests.hpp"
 
+#include <natscpp/library.hpp>
+
+#include <chrono>
+
 // Usage: natscpp_unit_tests [all|unit|integration|tls]
 //   unit         no server needed
 //   integration  nats-server with JetStream at nats://127.0.0.1:4222
@@ -23,6 +27,13 @@ int main(int argc, char** argv) {
   }
   if (all || group == "tls") {
     unit_tests::run_tls_and_auth_tests();
+  }
+  // Wait for nats.c's threads (connections destroyed above close in the background) before exit-time
+  // teardown, e.g. OpenSSL's, can pull state out from under them. Not a failure when it times out: nats.c
+  // 3.15.0's kvStore_PurgeDeletes leaks a reference (see tests/ci/lsan.supp), so nats.c never reaches zero
+  // objects after the KV tests even though every connection is closed.
+  if (const natsStatus s = natscpp::nats_CloseAndWait(std::chrono::seconds(2)); s != NATS_OK) {
+    std::cerr << "[natscpp_unit_tests] nats_CloseAndWait: " << natsStatus_GetText(s) << " (expected after KV tests)\n";
   }
   return 0;
 }

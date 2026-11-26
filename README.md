@@ -723,6 +723,10 @@ int64_t now_ns = natscpp::nats_NowInNanoSeconds();
   run after the `natscpp::connection` object is destroyed. Capture what they need by value or by `shared_ptr`.
 - Exceptions thrown by a handler or callback are caught and reported on stderr; they never unwind into nats.c.
 - `request_async` runs each request on its own thread (`std::async`).
+- Destroying a connection closes it in the background. Before `main` returns, once every natscpp object is
+  gone, call `natscpp::nats_CloseAndWait(timeout)` so nats.c's threads finish before exit-time teardown
+  (OpenSSL's in particular) runs underneath them; skipping it can crash a TLS client at exit. The examples do
+  this in `example::run`.
 
 ## Includes
 
