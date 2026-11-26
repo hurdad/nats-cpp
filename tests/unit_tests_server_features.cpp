@@ -94,10 +94,10 @@ void test_error_handler_reports_slow_consumer() {
   auto slow_f = slow->get_future();
 
   natscpp::connection_options opts;
-  opts.set_error_handler([slow, fired = std::make_shared<std::atomic<bool>>(false)](natsConnection*, natsSubscription*,
-                                                                                     natsStatus s) {
-    if (!fired->exchange(true)) slow->set_value(s);
-  });
+  opts.set_error_handler(
+      [slow, fired = std::make_shared<std::atomic<bool>>(false)](natsConnection*, natsSubscription*, natsStatus s) {
+        if (!fired->exchange(true)) slow->set_value(s);
+      });
   auto nc = connect_or_skip(opts, "error handler");
   if (!nc) return;
 
@@ -145,10 +145,12 @@ void test_connection_options_are_applied() {
   opts.set_no_echo(false);
   opts.set_custom_inbox_prefix("_NATSCPP_TEST_INBOX");
   // The test server has no auth, so it ignores the token; the handler must still be consulted.
-  opts.set_token_handler([](void*) -> const char* {
-    ++*token_calls_ptr;
-    return "ignored-token";
-  }, nullptr);
+  opts.set_token_handler(
+      [](void*) -> const char* {
+        ++*token_calls_ptr;
+        return "ignored-token";
+      },
+      nullptr);
   auto nc = connect_or_skip(opts, "connection options");
   if (!nc) return;
 
@@ -160,7 +162,10 @@ void test_connection_options_are_applied() {
   std::promise<std::string> seen_reply_to;
   auto seen_f = seen_reply_to.get_future();
   auto responder = nc->subscribe_async(subj, [&nc, &seen_reply_to](natscpp::message req) {
-    try { seen_reply_to.set_value(std::string(req.reply_to())); } catch (...) {}
+    try {
+      seen_reply_to.set_value(std::string(req.reply_to()));
+    } catch (...) {
+    }
     nc->publish(req.reply_to(), "pong");
   });
   nc->flush(2s);
@@ -197,7 +202,10 @@ void test_exception_in_handler_is_contained() {
   std::atomic<int> calls{0};
   auto sub = nc->subscribe_async(subj, [&](natscpp::message msg) {
     if (calls++ == 0) throw std::runtime_error("handler failure");
-    try { second.set_value(std::string(msg.data())); } catch (...) {}
+    try {
+      second.set_value(std::string(msg.data()));
+    } catch (...) {
+    }
   });
   nc->publish(subj, "first");
   nc->publish(subj, "second");
@@ -255,7 +263,10 @@ void test_subscription_outlives_connection_object() {
   std::promise<void> got;
   auto got_f = got.get_future();
   natscpp::subscription sub = nc->subscribe_async(subj, [&got](natscpp::message) {
-    try { got.set_value(); } catch (...) {}
+    try {
+      got.set_value();
+    } catch (...) {
+    }
   });
   natscpp::connection moved = std::move(*nc);
   nc.reset();  // destroy the moved-from object; the handler must survive

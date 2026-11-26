@@ -374,12 +374,8 @@ void test_jetstream_null_ctx_throws() {
   });
   expect_invalid([&] { (void)js.pull_subscribe("s", "d"); });
   expect_invalid([&] { (void)js.push_subscribe("s", "d"); });
-  expect_invalid([&] {
-    (void)js.create_stream(natscpp::js_stream_config{.name = "S", .subjects = {"s"}});
-  });
-  expect_invalid([&] {
-    (void)js.update_stream(natscpp::js_stream_config{.name = "S", .subjects = {"s"}});
-  });
+  expect_invalid([&] { (void)js.create_stream(natscpp::js_stream_config{.name = "S", .subjects = {"s"}}); });
+  expect_invalid([&] { (void)js.update_stream(natscpp::js_stream_config{.name = "S", .subjects = {"s"}}); });
   expect_invalid([&] { js.delete_stream("S"); });
   expect_invalid([&] { js.purge_stream("S"); });
   expect_invalid([&] { (void)js.get_stream_info("S"); });
@@ -411,13 +407,11 @@ void test_jetstream_consumer_config_validation_guards() {
   };
 
   // Empty stream name.
-  expect_invalid_arg([&] {
-    (void)js.create_consumer_group(natscpp::js_consumer_config{.stream = "", .durable_name = "D"});
-  });
+  expect_invalid_arg(
+      [&] { (void)js.create_consumer_group(natscpp::js_consumer_config{.stream = "", .durable_name = "D"}); });
   // Empty durable name.
-  expect_invalid_arg([&] {
-    (void)js.create_consumer_group(natscpp::js_consumer_config{.stream = "S", .durable_name = ""});
-  });
+  expect_invalid_arg(
+      [&] { (void)js.create_consumer_group(natscpp::js_consumer_config{.stream = "S", .durable_name = ""}); });
   // Push consumer without a deliver_subject.
   expect_invalid_arg([&] {
     (void)js.create_consumer_group(natscpp::js_consumer_config{
@@ -428,12 +422,10 @@ void test_jetstream_consumer_config_validation_guards() {
     });
   });
   // Same guards apply to update_consumer_group.
-  expect_invalid_arg([&] {
-    (void)js.update_consumer_group(natscpp::js_consumer_config{.stream = "", .durable_name = "D"});
-  });
-  expect_invalid_arg([&] {
-    (void)js.update_consumer_group(natscpp::js_consumer_config{.stream = "S", .durable_name = ""});
-  });
+  expect_invalid_arg(
+      [&] { (void)js.update_consumer_group(natscpp::js_consumer_config{.stream = "", .durable_name = "D"}); });
+  expect_invalid_arg(
+      [&] { (void)js.update_consumer_group(natscpp::js_consumer_config{.stream = "S", .durable_name = ""}); });
 }
 
 void test_js_pull_consumer_null_guard() {
@@ -660,7 +652,6 @@ void test_future_awaitable_destroyed_before_future_ready() {
   // No crash or sanitizer complaint = CAS guard is working.
 }
 
-
 #if NATS_VERSION_NUMBER >= 0x030A00
 int accept_all_verify_cb(int preverify_ok, void* /*x509_store_ctx*/) { return preverify_ok; }
 
@@ -728,7 +719,6 @@ void test_customize_options_runs_last_and_propagates_exceptions() {
   assert(calls == 1);
   assert(!nc.connected());
 }
-
 
 void test_moved_from_connection_subscribe_async_throws() {
   natscpp::connection a;

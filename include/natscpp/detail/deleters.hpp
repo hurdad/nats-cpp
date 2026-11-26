@@ -20,7 +20,6 @@ struct subscription_deleter {
   }
 };
 
-
 struct header_deleter {
   void operator()(natsHeader* ptr) const noexcept {
     if (ptr != nullptr) {

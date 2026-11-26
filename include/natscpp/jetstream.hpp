@@ -26,38 +26,38 @@ namespace natscpp {
 // ---------------------------------------------------------------------------
 
 enum class js_storage_type : int {
-  file   = js_FileStorage,
+  file = js_FileStorage,
   memory = js_MemoryStorage,
 };
 
 enum class js_retention_policy : int {
-  limits     = js_LimitsPolicy,
-  interest   = js_InterestPolicy,
+  limits = js_LimitsPolicy,
+  interest = js_InterestPolicy,
   work_queue = js_WorkQueuePolicy,
 };
 
 enum class js_discard_policy : int {
-  old      = js_DiscardOld,
+  old = js_DiscardOld,
   new_msgs = js_DiscardNew,
 };
 
 enum class js_deliver_policy : int {
-  all             = js_DeliverAll,
-  last            = js_DeliverLast,
-  new_msgs        = js_DeliverNew,
-  by_start_seq    = js_DeliverByStartSequence,
-  by_start_time   = js_DeliverByStartTime,
+  all = js_DeliverAll,
+  last = js_DeliverLast,
+  new_msgs = js_DeliverNew,
+  by_start_seq = js_DeliverByStartSequence,
+  by_start_time = js_DeliverByStartTime,
   last_per_subject = js_DeliverLastPerSubject,
 };
 
 enum class js_ack_policy : int {
   explicit_ = js_AckExplicit,
-  none      = js_AckNone,
-  all       = js_AckAll,
+  none = js_AckNone,
+  all = js_AckAll,
 };
 
 enum class js_replay_policy : int {
-  instant  = js_ReplayInstant,
+  instant = js_ReplayInstant,
   original = js_ReplayOriginal,
 };
 
@@ -72,11 +72,11 @@ struct js_publish_options {
   std::string msg_id;
   std::string expected_stream;
   std::string expected_last_msg_id;
-  uint64_t    expected_last_seq         = 0;
-  uint64_t    expected_last_subject_seq = 0;
-  bool        expect_no_message         = false;
-  int64_t     max_wait_ms               = 0;  ///< 0 = use context default
-  int64_t     msg_ttl_ms                = 0;  ///< 0 = no TTL (requires nats-server 2.11+)
+  uint64_t expected_last_seq = 0;
+  uint64_t expected_last_subject_seq = 0;
+  bool expect_no_message = false;
+  int64_t max_wait_ms = 0;  ///< 0 = use context default
+  int64_t msg_ttl_ms = 0;   ///< 0 = no TTL (requires nats-server 2.11+)
 };
 
 /**
@@ -84,9 +84,9 @@ struct js_publish_options {
  */
 struct js_pub_ack {
   std::string stream;
-  uint64_t    sequence  = 0;
+  uint64_t sequence = 0;
   std::string domain;
-  bool        duplicate = false;
+  bool duplicate = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -102,24 +102,24 @@ enum class js_consumer_type {
  * @brief Configuration used to create or update a JetStream stream.
  */
 struct js_stream_config {
-  std::string                     name;
-  std::vector<std::string>        subjects;
-  std::optional<std::string>      description;
-  js_storage_type                 storage             = js_storage_type::file;
-  js_retention_policy             retention           = js_retention_policy::limits;
-  js_discard_policy               discard             = js_discard_policy::old;
-  int64_t                         max_consumers       = -1;
-  int64_t                         max_msgs            = -1;
-  int64_t                         max_bytes           = -1;
-  int64_t                         max_age_ns          = 0;   ///< nanoseconds; 0 = unlimited
-  int64_t                         max_msgs_per_subject = -1;
-  int32_t                         max_msg_size        = -1;  ///< bytes; -1 = unlimited
-  int64_t                         replicas            = 1;
-  bool                            no_ack              = false;
-  int64_t                         duplicates_ns       = 0;   ///< dedup window in nanoseconds
-  bool                            allow_direct        = false;
-  bool                            deny_delete         = false;
-  bool                            deny_purge          = false;
+  std::string name;
+  std::vector<std::string> subjects;
+  std::optional<std::string> description;
+  js_storage_type storage = js_storage_type::file;
+  js_retention_policy retention = js_retention_policy::limits;
+  js_discard_policy discard = js_discard_policy::old;
+  int64_t max_consumers = -1;
+  int64_t max_msgs = -1;
+  int64_t max_bytes = -1;
+  int64_t max_age_ns = 0;  ///< nanoseconds; 0 = unlimited
+  int64_t max_msgs_per_subject = -1;
+  int32_t max_msg_size = -1;  ///< bytes; -1 = unlimited
+  int64_t replicas = 1;
+  bool no_ack = false;
+  int64_t duplicates_ns = 0;  ///< dedup window in nanoseconds
+  bool allow_direct = false;
+  bool deny_delete = false;
+  bool deny_purge = false;
 };
 
 /**
@@ -128,11 +128,11 @@ struct js_stream_config {
 struct stream_info {
   std::string name;
   std::string description;
-  uint64_t    messages   = 0;
-  uint64_t    bytes      = 0;
-  uint64_t    first_seq  = 0;
-  uint64_t    last_seq   = 0;
-  int64_t     consumers  = 0;
+  uint64_t messages = 0;
+  uint64_t bytes = 0;
+  uint64_t first_seq = 0;
+  uint64_t last_seq = 0;
+  int64_t consumers = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -143,26 +143,26 @@ struct stream_info {
  * @brief Configuration used to create or update a JetStream consumer.
  */
 struct js_consumer_config {
-  std::string                 stream;
-  std::string                 durable_name;
-  std::string                 filter_subject;
-  std::string                 deliver_subject;          ///< push consumers
-  std::string                 deliver_group;            ///< push consumers (queue group)
-  js_consumer_type            type                = js_consumer_type::pull;
-  js_deliver_policy           deliver_policy      = js_deliver_policy::all;
-  js_ack_policy               ack_policy          = js_ack_policy::explicit_;
-  js_replay_policy            replay_policy       = js_replay_policy::instant;
-  int64_t                     ack_wait_ns         = 0;   ///< nanoseconds; 0 = server default
-  int64_t                     max_deliver         = -1;  ///< -1 = unlimited
-  int64_t                     max_ack_pending     = -1;  ///< -1 = server default
-  int64_t                     max_waiting         = -1;  ///< pull consumers; -1 = server default
-  int64_t                     inactive_threshold_ns = 0; ///< ephemeral consumer inactivity; 0 = server default
-  int64_t                     replicas            = 0;   ///< 0 = inherit from stream
-  bool                        headers_only        = false;
-  uint64_t                    opt_start_seq       = 0;   ///< for deliver_policy::by_start_seq
-  int64_t                     opt_start_time_ns   = 0;   ///< for deliver_policy::by_start_time (UTC nanoseconds)
-  std::vector<std::string>    filter_subjects;           ///< multi-filter alternative to filter_subject
-  std::optional<std::string>  description;
+  std::string stream;
+  std::string durable_name;
+  std::string filter_subject;
+  std::string deliver_subject;  ///< push consumers
+  std::string deliver_group;    ///< push consumers (queue group)
+  js_consumer_type type = js_consumer_type::pull;
+  js_deliver_policy deliver_policy = js_deliver_policy::all;
+  js_ack_policy ack_policy = js_ack_policy::explicit_;
+  js_replay_policy replay_policy = js_replay_policy::instant;
+  int64_t ack_wait_ns = 0;            ///< nanoseconds; 0 = server default
+  int64_t max_deliver = -1;           ///< -1 = unlimited
+  int64_t max_ack_pending = -1;       ///< -1 = server default
+  int64_t max_waiting = -1;           ///< pull consumers; -1 = server default
+  int64_t inactive_threshold_ns = 0;  ///< ephemeral consumer inactivity; 0 = server default
+  int64_t replicas = 0;               ///< 0 = inherit from stream
+  bool headers_only = false;
+  uint64_t opt_start_seq = 0;                ///< for deliver_policy::by_start_seq
+  int64_t opt_start_time_ns = 0;             ///< for deliver_policy::by_start_time (UTC nanoseconds)
+  std::vector<std::string> filter_subjects;  ///< multi-filter alternative to filter_subject
+  std::optional<std::string> description;
 };
 
 /**
@@ -178,10 +178,10 @@ struct consumer_info {
 // ---------------------------------------------------------------------------
 
 struct js_account_info {
-  uint64_t memory    = 0;
-  uint64_t store     = 0;
-  int64_t  streams   = 0;
-  int64_t  consumers = 0;
+  uint64_t memory = 0;
+  uint64_t store = 0;
+  int64_t streams = 0;
+  int64_t consumers = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -195,7 +195,9 @@ class js_pull_consumer {
  public:
   js_pull_consumer() = default;
   explicit js_pull_consumer(natsSubscription* sub) : sub_(sub) {}
-  ~js_pull_consumer() { if (sub_ != nullptr) natsSubscription_Destroy(sub_); }
+  ~js_pull_consumer() {
+    if (sub_ != nullptr) natsSubscription_Destroy(sub_);
+  }
 
   js_pull_consumer(const js_pull_consumer&) = delete;
   js_pull_consumer& operator=(const js_pull_consumer&) = delete;
@@ -225,7 +227,10 @@ class js_pull_consumer {
     natsMsgList list{};
     throw_on_error(natsSubscription_Fetch(&list, sub_, batch, static_cast<int64_t>(timeout.count()), nullptr),
                    "natsSubscription_Fetch");
-    struct list_guard { natsMsgList& l; ~list_guard() { natsMsgList_Destroy(&l); } } guard{list};
+    struct list_guard {
+      natsMsgList& l;
+      ~list_guard() { natsMsgList_Destroy(&l); }
+    } guard{list};
     std::vector<message> out;
     out.reserve(static_cast<std::size_t>(list.Count));
     for (int i = 0; i < list.Count; ++i) {
@@ -256,7 +261,9 @@ class js_push_consumer {
  public:
   js_push_consumer() = default;
   explicit js_push_consumer(natsSubscription* sub) : sub_(sub) {}
-  ~js_push_consumer() { if (sub_ != nullptr) natsSubscription_Destroy(sub_); }
+  ~js_push_consumer() {
+    if (sub_ != nullptr) natsSubscription_Destroy(sub_);
+  }
 
   js_push_consumer(const js_push_consumer&) = delete;
   js_push_consumer& operator=(const js_push_consumer&) = delete;
@@ -301,7 +308,9 @@ class jetstream {
     throw_on_error(natsConnection_JetStream(&ctx_, conn.native_handle(), nullptr), "natsConnection_JetStream");
   }
 
-  ~jetstream() { if (ctx_ != nullptr) jsCtx_Destroy(ctx_); }
+  ~jetstream() {
+    if (ctx_ != nullptr) jsCtx_Destroy(ctx_);
+  }
 
   jetstream(const jetstream&) = delete;
   jetstream& operator=(const jetstream&) = delete;
@@ -361,8 +370,8 @@ class jetstream {
   [[nodiscard]] js_pull_consumer pull_subscribe(std::string_view stream_subject, std::string_view durable_name) {
     check_valid();
     natsSubscription* sub{};
-    throw_on_error(js_PullSubscribe(&sub, ctx_, std::string(stream_subject).c_str(),
-                                    std::string(durable_name).c_str(), nullptr, nullptr, nullptr),
+    throw_on_error(js_PullSubscribe(&sub, ctx_, std::string(stream_subject).c_str(), std::string(durable_name).c_str(),
+                                    nullptr, nullptr, nullptr),
                    "js_PullSubscribe");
     return js_pull_consumer{sub};
   }
@@ -534,8 +543,9 @@ class jetstream {
   [[nodiscard]] message get_last_msg(std::string_view stream, std::string_view subject) {
     check_valid();
     natsMsg* msg{};
-    throw_on_error(js_GetLastMsg(&msg, ctx_, std::string(stream).c_str(), std::string(subject).c_str(), nullptr, nullptr),
-                   "js_GetLastMsg");
+    throw_on_error(
+        js_GetLastMsg(&msg, ctx_, std::string(stream).c_str(), std::string(subject).c_str(), nullptr, nullptr),
+        "js_GetLastMsg");
     return message{msg};
   }
 
@@ -584,8 +594,8 @@ class jetstream {
     consumer_info out{};
     if (consumer_info_raw != nullptr) {
       std::unique_ptr<jsConsumerInfo, void (*)(jsConsumerInfo*)> holder(consumer_info_raw, jsConsumerInfo_Destroy);
-      out.stream_name  = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : "";
-      out.durable_name = consumer_info_raw->Name   != nullptr ? consumer_info_raw->Name   : "";
+      out.stream_name = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : "";
+      out.durable_name = consumer_info_raw->Name != nullptr ? consumer_info_raw->Name : "";
     }
 
     return out;
@@ -600,9 +610,9 @@ class jetstream {
       throw std::invalid_argument("consumer durable name cannot be empty");
     }
 
-    throw_on_error(js_DeleteConsumer(ctx_, std::string(stream).c_str(), std::string(durable_name).c_str(), nullptr,
-                                     nullptr),
-                   "js_DeleteConsumer");
+    throw_on_error(
+        js_DeleteConsumer(ctx_, std::string(stream).c_str(), std::string(durable_name).c_str(), nullptr, nullptr),
+        "js_DeleteConsumer");
   }
 
   [[nodiscard]] std::vector<consumer_info> list_consumer_groups(std::string_view stream) {
@@ -673,9 +683,9 @@ class jetstream {
     std::unique_ptr<jsAccountInfo, void (*)(jsAccountInfo*)> holder(raw, jsAccountInfo_Destroy);
     js_account_info out;
     if (raw != nullptr) {
-      out.memory    = raw->Memory;
-      out.store     = raw->Store;
-      out.streams   = raw->Streams;
+      out.memory = raw->Memory;
+      out.store = raw->Store;
+      out.streams = raw->Streams;
       out.consumers = raw->Consumers;
     }
     return out;
@@ -690,14 +700,38 @@ class jetstream {
   static bool to_native_pub_options(const js_publish_options& opts, jsPubOptions& native) {
     throw_on_error(jsPubOptions_Init(&native), "jsPubOptions_Init");
     bool has_opts = false;
-    if (!opts.msg_id.empty())                { native.MsgId = opts.msg_id.c_str(); has_opts = true; }
-    if (!opts.expected_stream.empty())       { native.ExpectStream = opts.expected_stream.c_str(); has_opts = true; }
-    if (!opts.expected_last_msg_id.empty())  { native.ExpectLastMsgId = opts.expected_last_msg_id.c_str(); has_opts = true; }
-    if (opts.expected_last_seq > 0)          { native.ExpectLastSeq = opts.expected_last_seq; has_opts = true; }
-    if (opts.expected_last_subject_seq > 0)  { native.ExpectLastSubjectSeq = opts.expected_last_subject_seq; has_opts = true; }
-    if (opts.expect_no_message)              { native.ExpectNoMessage = true; has_opts = true; }
-    if (opts.max_wait_ms > 0)                { native.MaxWait = opts.max_wait_ms; has_opts = true; }
-    if (opts.msg_ttl_ms > 0)                 { native.MsgTTL = opts.msg_ttl_ms; has_opts = true; }
+    if (!opts.msg_id.empty()) {
+      native.MsgId = opts.msg_id.c_str();
+      has_opts = true;
+    }
+    if (!opts.expected_stream.empty()) {
+      native.ExpectStream = opts.expected_stream.c_str();
+      has_opts = true;
+    }
+    if (!opts.expected_last_msg_id.empty()) {
+      native.ExpectLastMsgId = opts.expected_last_msg_id.c_str();
+      has_opts = true;
+    }
+    if (opts.expected_last_seq > 0) {
+      native.ExpectLastSeq = opts.expected_last_seq;
+      has_opts = true;
+    }
+    if (opts.expected_last_subject_seq > 0) {
+      native.ExpectLastSubjectSeq = opts.expected_last_subject_seq;
+      has_opts = true;
+    }
+    if (opts.expect_no_message) {
+      native.ExpectNoMessage = true;
+      has_opts = true;
+    }
+    if (opts.max_wait_ms > 0) {
+      native.MaxWait = opts.max_wait_ms;
+      has_opts = true;
+    }
+    if (opts.msg_ttl_ms > 0) {
+      native.MsgTTL = opts.msg_ttl_ms;
+      has_opts = true;
+    }
     return has_opts;
   }
 
@@ -706,13 +740,13 @@ class jetstream {
     stream_info out;
     if (si == nullptr) return out;
     if (si->Config != nullptr) {
-      out.name        = si->Config->Name        != nullptr ? si->Config->Name        : "";
+      out.name = si->Config->Name != nullptr ? si->Config->Name : "";
       out.description = si->Config->Description != nullptr ? si->Config->Description : "";
     }
-    out.messages  = si->State.Msgs;
-    out.bytes     = si->State.Bytes;
+    out.messages = si->State.Msgs;
+    out.bytes = si->State.Bytes;
     out.first_seq = si->State.FirstSeq;
-    out.last_seq  = si->State.LastSeq;
+    out.last_seq = si->State.LastSeq;
     out.consumers = si->State.Consumers;
     return out;
   }
@@ -722,9 +756,9 @@ class jetstream {
     js_pub_ack out;
     if (raw != nullptr) {
       std::unique_ptr<jsPubAck, void (*)(jsPubAck*)> holder(raw, jsPubAck_Destroy);
-      out.stream    = raw->Stream    != nullptr ? raw->Stream    : "";
-      out.sequence  = raw->Sequence;
-      out.domain    = raw->Domain    != nullptr ? raw->Domain    : "";
+      out.stream = raw->Stream != nullptr ? raw->Stream : "";
+      out.sequence = raw->Sequence;
+      out.domain = raw->Domain != nullptr ? raw->Domain : "";
       out.duplicate = raw->Duplicate;
     }
     return out;
@@ -738,25 +772,25 @@ class jetstream {
 
     jsStreamConfig native{};
     throw_on_error(jsStreamConfig_Init(&native), "jsStreamConfig_Init");  // keeps nats.c defaults for unset fields
-    native.Name        = config.name.c_str();
-    native.Subjects    = subjects.empty() ? nullptr : subjects.data();
+    native.Name = config.name.c_str();
+    native.Subjects = subjects.empty() ? nullptr : subjects.data();
     native.SubjectsLen = static_cast<int>(subjects.size());
     native.Description = config.description ? config.description->c_str() : nullptr;
-    native.Storage     = static_cast<jsStorageType>(config.storage);
-    native.Retention   = static_cast<jsRetentionPolicy>(config.retention);
-    native.Discard     = static_cast<jsDiscardPolicy>(config.discard);
-    native.MaxConsumers      = config.max_consumers;
-    native.MaxMsgs           = config.max_msgs;
-    native.MaxBytes          = config.max_bytes;
-    native.MaxAge            = config.max_age_ns;
+    native.Storage = static_cast<jsStorageType>(config.storage);
+    native.Retention = static_cast<jsRetentionPolicy>(config.retention);
+    native.Discard = static_cast<jsDiscardPolicy>(config.discard);
+    native.MaxConsumers = config.max_consumers;
+    native.MaxMsgs = config.max_msgs;
+    native.MaxBytes = config.max_bytes;
+    native.MaxAge = config.max_age_ns;
     native.MaxMsgsPerSubject = config.max_msgs_per_subject;
-    native.MaxMsgSize        = config.max_msg_size;
-    native.Replicas          = config.replicas;
-    native.NoAck             = config.no_ack;
-    native.Duplicates        = config.duplicates_ns;
-    native.AllowDirect       = config.allow_direct;
-    native.DenyDelete        = config.deny_delete;
-    native.DenyPurge         = config.deny_purge;
+    native.MaxMsgSize = config.max_msg_size;
+    native.Replicas = config.replicas;
+    native.NoAck = config.no_ack;
+    native.Duplicates = config.duplicates_ns;
+    native.AllowDirect = config.allow_direct;
+    native.DenyDelete = config.deny_delete;
+    native.DenyPurge = config.deny_purge;
 
     return {std::move(subjects), native};
   }
@@ -778,28 +812,28 @@ class jetstream {
 
     jsConsumerConfig consumer_config{};
     throw_on_error(jsConsumerConfig_Init(&consumer_config), "jsConsumerConfig_Init");
-    consumer_config.Durable       = config.durable_name.c_str();
-    consumer_config.Description   = config.description ? config.description->c_str() : nullptr;
+    consumer_config.Durable = config.durable_name.c_str();
+    consumer_config.Description = config.description ? config.description->c_str() : nullptr;
     consumer_config.DeliverPolicy = static_cast<jsDeliverPolicy>(config.deliver_policy);
-    consumer_config.AckPolicy     = static_cast<jsAckPolicy>(config.ack_policy);
-    consumer_config.ReplayPolicy  = static_cast<jsReplayPolicy>(config.replay_policy);
-    consumer_config.HeadersOnly   = config.headers_only;
+    consumer_config.AckPolicy = static_cast<jsAckPolicy>(config.ack_policy);
+    consumer_config.ReplayPolicy = static_cast<jsReplayPolicy>(config.replay_policy);
+    consumer_config.HeadersOnly = config.headers_only;
 
     if (!config.filter_subject.empty()) {
       consumer_config.FilterSubject = config.filter_subject.c_str();
     }
-    if (config.ack_wait_ns > 0)          consumer_config.AckWait           = config.ack_wait_ns;
-    if (config.max_deliver >= 0)         consumer_config.MaxDeliver         = config.max_deliver;
-    if (config.max_ack_pending >= 0)     consumer_config.MaxAckPending      = config.max_ack_pending;
-    if (config.max_waiting >= 0)         consumer_config.MaxWaiting         = config.max_waiting;
+    if (config.ack_wait_ns > 0) consumer_config.AckWait = config.ack_wait_ns;
+    if (config.max_deliver >= 0) consumer_config.MaxDeliver = config.max_deliver;
+    if (config.max_ack_pending >= 0) consumer_config.MaxAckPending = config.max_ack_pending;
+    if (config.max_waiting >= 0) consumer_config.MaxWaiting = config.max_waiting;
     if (config.inactive_threshold_ns > 0) consumer_config.InactiveThreshold = config.inactive_threshold_ns;
-    if (config.replicas > 0)             consumer_config.Replicas           = config.replicas;
-    if (config.opt_start_seq > 0)        consumer_config.OptStartSeq        = config.opt_start_seq;
-    if (config.opt_start_time_ns > 0)    consumer_config.OptStartTime       = config.opt_start_time_ns;
+    if (config.replicas > 0) consumer_config.Replicas = config.replicas;
+    if (config.opt_start_seq > 0) consumer_config.OptStartSeq = config.opt_start_seq;
+    if (config.opt_start_time_ns > 0) consumer_config.OptStartTime = config.opt_start_time_ns;
 
     if (config.type == js_consumer_type::push) {
       consumer_config.DeliverSubject = config.deliver_subject.c_str();
-      consumer_config.DeliverGroup   = config.deliver_group.empty() ? nullptr : config.deliver_group.c_str();
+      consumer_config.DeliverGroup = config.deliver_group.empty() ? nullptr : config.deliver_group.c_str();
     }
 
     // Multi-filter subjects (alternative to single FilterSubject).
@@ -807,7 +841,7 @@ class jetstream {
     if (!config.filter_subjects.empty()) {
       filter_subject_ptrs.reserve(config.filter_subjects.size());
       for (const auto& s : config.filter_subjects) filter_subject_ptrs.push_back(s.c_str());
-      consumer_config.FilterSubjects    = filter_subject_ptrs.data();
+      consumer_config.FilterSubjects = filter_subject_ptrs.data();
       consumer_config.FilterSubjectsLen = static_cast<int>(filter_subject_ptrs.size());
     }
 
@@ -817,9 +851,9 @@ class jetstream {
           js_UpdateConsumer(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr, nullptr),
           "js_UpdateConsumer");
     } else {
-      throw_on_error(js_AddConsumer(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr,
-                                    nullptr),
-                     "js_AddConsumer");
+      throw_on_error(
+          js_AddConsumer(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr, nullptr),
+          "js_AddConsumer");
     }
 
     consumer_info out{
@@ -828,8 +862,8 @@ class jetstream {
     };
     if (consumer_info_raw != nullptr) {
       std::unique_ptr<jsConsumerInfo, void (*)(jsConsumerInfo*)> holder(consumer_info_raw, jsConsumerInfo_Destroy);
-      out.stream_name  = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : out.stream_name;
-      out.durable_name = consumer_info_raw->Name   != nullptr ? consumer_info_raw->Name   : out.durable_name;
+      out.stream_name = consumer_info_raw->Stream != nullptr ? consumer_info_raw->Stream : out.stream_name;
+      out.durable_name = consumer_info_raw->Name != nullptr ? consumer_info_raw->Name : out.durable_name;
     }
 
     return out;

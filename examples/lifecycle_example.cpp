@@ -18,9 +18,9 @@ int main() {
 
     natscpp::connection_options opts;
     opts.set_url(example::server_url());
-    opts.set_max_reconnect(10);                                // give up after 10 attempts
+    opts.set_max_reconnect(10);  // give up after 10 attempts
     opts.set_reconnect_wait(std::chrono::milliseconds(500));
-    opts.set_reconnect_jitter(100, 1000);                      // spread reconnects of many clients
+    opts.set_reconnect_jitter(100, 1000);  // spread reconnects of many clients
     opts.set_disconnected_cb([](natsConnection*) { std::cout << "[cb] disconnected\n"; });
     opts.set_reconnected_cb([](natsConnection*) { std::cout << "[cb] reconnected\n"; });
     opts.set_error_handler([](natsConnection*, natsSubscription*, natsStatus s) {
@@ -48,8 +48,8 @@ int main() {
     }
 
     auto stats = nc.get_statistics();
-    std::cout << "handled " << *received << " messages; out " << stats.out_messages << " msgs / "
-              << stats.out_bytes << " bytes, in " << stats.in_messages << " msgs\n";
+    std::cout << "handled " << *received << " messages; out " << stats.out_messages << " msgs / " << stats.out_bytes
+              << " bytes, in " << stats.in_messages << " msgs\n";
     return *received == 100 ? 0 : 1;
   });
 }

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <atomic>
-#include <coroutine>
 #include <chrono>
+#include <coroutine>
 #include <future>
 #include <memory>
 #include <thread>
@@ -30,8 +30,7 @@ namespace natscpp {
 template <typename T>
 class future_awaitable {
  public:
-  explicit future_awaitable(std::future<T> fut)
-      : state_(std::make_shared<shared_state>(std::move(fut))) {}
+  explicit future_awaitable(std::future<T> fut) : state_(std::make_shared<shared_state>(std::move(fut))) {}
 
   // Move-only: destroying any copy would cancel the pending resume and leave the coroutine suspended forever.
   future_awaitable(const future_awaitable&) = delete;

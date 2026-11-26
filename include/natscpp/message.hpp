@@ -2,9 +2,9 @@
 
 #include <nats/nats.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
-#include <chrono>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -36,10 +36,10 @@ class message {
 
   static message create(std::string_view subject, std::string_view reply_to, std::string_view payload) {
     natsMsg* raw{};
-    throw_on_error(natsMsg_Create(&raw, std::string(subject).c_str(),
-                                  reply_to.empty() ? nullptr : std::string(reply_to).c_str(), payload.data(),
-                                  static_cast<int>(payload.size())),
-                   "natsMsg_Create");
+    throw_on_error(
+        natsMsg_Create(&raw, std::string(subject).c_str(), reply_to.empty() ? nullptr : std::string(reply_to).c_str(),
+                       payload.data(), static_cast<int>(payload.size())),
+        "natsMsg_Create");
     return message{raw};
   }
 
@@ -98,7 +98,10 @@ class message {
     int count = 0;
     throw_on_error(natsMsgHeader_Values(msg_.get(), std::string(key).c_str(), &values, &count), "natsMsgHeader_Values");
     // nats.c allocates the outer array; free it even if the loop throws.
-    struct array_free { const char** p; ~array_free() { std::free(const_cast<char**>(p)); } } guard{values};
+    struct array_free {
+      const char** p;
+      ~array_free() { std::free(const_cast<char**>(p)); }
+    } guard{values};
 
     std::vector<std::string> result;
     result.reserve(static_cast<std::size_t>(count));
@@ -114,7 +117,10 @@ class message {
     int count = 0;
     throw_on_error(natsMsgHeader_Keys(msg_.get(), &keys, &count), "natsMsgHeader_Keys");
     // nats.c allocates the outer array; free it even if the loop throws.
-    struct array_free { const char** p; ~array_free() { std::free(const_cast<char**>(p)); } } guard{keys};
+    struct array_free {
+      const char** p;
+      ~array_free() { std::free(const_cast<char**>(p)); }
+    } guard{keys};
 
     std::vector<std::string> result;
     result.reserve(static_cast<std::size_t>(count));

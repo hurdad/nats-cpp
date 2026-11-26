@@ -24,7 +24,9 @@ void test_connection_has_sync_and_async_apis() {
   natscpp::jetstream js;
 
   static_assert(requires { nc.subscribe_sync("subj"); });
-  static_assert(requires(std::function<void(natscpp::message)> fn) { nc.subscribe_async_timeout("subj", std::chrono::milliseconds(10), fn); });
+  static_assert(requires(std::function<void(natscpp::message)> fn) {
+    nc.subscribe_async_timeout("subj", std::chrono::milliseconds(10), fn);
+  });
   static_assert(requires { nc.flush(std::chrono::milliseconds(10)); });
   static_assert(requires { nc.flush(); });
   static_assert(requires { nc.sign("nonce"); });
@@ -55,9 +57,8 @@ void test_connection_has_sync_and_async_apis() {
     nc.subscribe_queue_async_timeout("subj", "workers", std::chrono::milliseconds(10), fn);
   });
   static_assert(requires(std::function<void(natscpp::message)> fn) { nc.subscribe_async("subj", fn); });
-  static_assert(requires(std::function<void(natscpp::message)> fn) {
-    nc.subscribe_queue_async("subj", "workers", fn);
-  });
+  static_assert(
+      requires(std::function<void(natscpp::message)> fn) { nc.subscribe_queue_async("subj", "workers", fn); });
   static_assert(requires { nc.request_sync("svc", "payload"); });
   static_assert(requires { nc.request_async("svc", "payload"); });
   static_assert(requires(natscpp::connection_options opts, natsSignatureHandler sig_cb, void* closure,
@@ -90,9 +91,13 @@ void test_connection_has_sync_and_async_apis() {
     { opts.ssl_verification_callback } -> std::same_as<std::optional<natsSSLVerifyCb>&>;
   });
 #endif
-  static_assert(requires(natscpp::message m) { m.ack_sync(); m.nak_with_delay(std::chrono::milliseconds(10)); m.get_metadata(); });
-  static_assert(requires(char* buffer, size_t buf_len, FILE* stream, natsClientConfig* cfg,
-                         unsigned char** signature, int* signature_length) {
+  static_assert(requires(natscpp::message m) {
+    m.ack_sync();
+    m.nak_with_delay(std::chrono::milliseconds(10));
+    m.get_metadata();
+  });
+  static_assert(requires(char* buffer, size_t buf_len, FILE* stream, natsClientConfig* cfg, unsigned char** signature,
+                         int* signature_length) {
     natscpp::nats_CheckCompatibility();
     natscpp::nats_CheckCompatibilityImpl(1, 1, "1.0.0");
     natscpp::nats_Close();
@@ -153,9 +158,7 @@ void test_connection_has_sync_and_async_apis() {
     watcher.next();
     watcher.stop();
   });
-  static_assert(requires {
-    js.create_stream(natscpp::js_stream_config{.name = "ORDERS", .subjects = {"orders.>"}});
-  });
+  static_assert(requires { js.create_stream(natscpp::js_stream_config{.name = "ORDERS", .subjects = {"orders.>"}}); });
   static_assert(requires {
     js.create_consumer_group(natscpp::js_consumer_config{.stream = "ORDERS", .durable_name = "orders-pull"});
   });
@@ -168,9 +171,7 @@ void test_connection_has_sync_and_async_apis() {
     js.list_consumer_groups("ORDERS");
     js.list_consumer_group_names("ORDERS");
   });
-  static_assert(requires {
-    js.push_subscribe("orders.created", "orders-push");
-  });
+  static_assert(requires { js.push_subscribe("orders.created", "orders-push"); });
 }
 
 }  // namespace

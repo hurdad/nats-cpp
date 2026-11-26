@@ -10,10 +10,14 @@
 namespace {
 const char* op_name(kvOperation op) {
   switch (op) {
-    case kvOp_Put: return "put";
-    case kvOp_Delete: return "delete";
-    case kvOp_Purge: return "purge";
-    default: return "unknown";
+    case kvOp_Put:
+      return "put";
+    case kvOp_Delete:
+      return "delete";
+    case kvOp_Purge:
+      return "purge";
+    default:
+      return "unknown";
   }
 }
 }  // namespace
@@ -57,13 +61,12 @@ int main() {
     }
     kv.erase("user-2");
     auto update = watcher.next(2000);
-    std::cout << "watch: " << op_name(update.operation()) << ' ' << update.key() << " (revision "
-              << update.revision() << ")\n";
+    std::cout << "watch: " << op_name(update.operation()) << ' ' << update.key() << " (revision " << update.revision()
+              << ")\n";
     watcher.stop();
 
     auto status = kv.status();
-    std::cout << "bucket " << status.bucket << ": " << status.values << " values, history " << status.history
-              << '\n';
+    std::cout << "bucket " << status.bucket << ": " << status.values << " values, history " << status.history << '\n';
     return rev2 > rev1 ? 0 : 1;
   });
 }

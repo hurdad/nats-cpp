@@ -37,8 +37,7 @@ std::string unique(std::string_view prefix) {
   return std::string(prefix) + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
 }
 
-std::optional<natscpp::connection> connect_or_skip(std::string_view what,
-                                                   natscpp::connection_options opts = {}) {
+std::optional<natscpp::connection> connect_or_skip(std::string_view what, natscpp::connection_options opts = {}) {
   try {
     return std::optional<natscpp::connection>{std::in_place, opts};
   } catch (const natscpp::nats_error&) {
@@ -153,8 +152,7 @@ void test_invalid_objects_reject_operations() {
   assert(msg.timestamp() == 0 && msg.sequence() == 0);
 
   natscpp::jetstream js;
-  assert(status_of([&] { (void)js.create_consumer_group({.stream = "S", .durable_name = "d"}); }) ==
-         NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.create_consumer_group({.stream = "S", .durable_name = "d"}); }) == NATS_INVALID_ARG);
   assert(status_of([&] { (void)js.subscribe_async("s", "d", [](natscpp::message) {}); }) == NATS_INVALID_ARG);
 
   natscpp::js_pull_consumer pull;
@@ -330,7 +328,7 @@ void test_connection_state_and_header_support() {
 void test_rarely_used_connection_options_are_accepted() {
   natscpp::connection_options opts;
   opts.set_token("ignored-by-a-server-without-auth");
-  opts.set_secure(false);                     // opt out of the TLS requirement the next two would add
+  opts.set_secure(false);  // opt out of the TLS requirement the next two would add
   opts.set_expected_hostname("localhost");
   opts.set_ciphers("HIGH:!aNULL");
   opts.set_lame_duck_mode_cb([](natsConnection*) {});
@@ -354,9 +352,8 @@ void test_no_responders_message() {
 
   std::promise<bool> seen;
   const auto async_inbox = nc->new_inbox();
-  auto async_replies = nc->subscribe_async(async_inbox, [&seen](natscpp::message m) {
-    seen.set_value(m.is_no_responders());
-  });
+  auto async_replies =
+      nc->subscribe_async(async_inbox, [&seen](natscpp::message m) { seen.set_value(m.is_no_responders()); });
   nc->publish_request(nobody, async_inbox, "anyone?");
   auto fut = seen.get_future();
   assert(fut.wait_for(2s) == std::future_status::ready && fut.get());
@@ -424,10 +421,8 @@ void test_jetstream_validation_and_options() {
       .description = "every field",
   });
   assert(ci.durable_name == "all-fields");
-  (void)js.create_consumer_group({.stream = stream,
-                                  .durable_name = "pull-fields",
-                                  .max_waiting = 16,
-                                  .inactive_threshold_ns = 60'000'000'000});
+  (void)js.create_consumer_group(
+      {.stream = stream, .durable_name = "pull-fields", .max_waiting = 16, .inactive_threshold_ns = 60'000'000'000});
 
   // Publish options: each expectation set to the value that holds, so the publish succeeds.
   auto first = js.publish(subject + ".a", "one", {.msg_id = "m1"});

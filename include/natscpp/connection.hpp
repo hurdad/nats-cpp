@@ -2,17 +2,17 @@
 
 #include <nats/nats.h>
 
-#include <chrono>
 #include <array>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <future>
 #include <limits>
 #include <memory>
-#include <stdexcept>
-#include <cstdlib>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -58,11 +58,11 @@ struct connection_options {
   // regardless.
   std::optional<bool> secure;
   std::optional<std::string> ca_trusted_certificates_file;
-  std::optional<std::string> ca_certs_path;           // directory of CA certificates
+  std::optional<std::string> ca_certs_path;  // directory of CA certificates
   std::optional<std::string> certificates_chain_file;
   std::optional<std::string> private_key_file;
   std::optional<bool> skip_server_verification;
-  std::optional<std::string> expected_hostname;       // TLS SNI override
+  std::optional<std::string> expected_hostname;  // TLS SNI override
   std::optional<std::string> ciphers;
   std::optional<std::string> cipher_suites;
 #if NATS_VERSION_NUMBER >= 0x030A00  // natsOptions_SetSSLVerificationCallback: nats.c >= 3.10.0 (EXPERIMENTAL)
@@ -220,9 +220,7 @@ class connection {
 
   connection() = default;
 
-  explicit connection(const connection_options& options) {
-    connect(options);
-  }
+  explicit connection(const connection_options& options) { connect(options); }
 
   connection(const connection&) = delete;
   connection& operator=(const connection&) = delete;
@@ -273,9 +271,7 @@ class connection {
   /**
    * @brief Triggers a reconnect to the current server.
    */
-  void reconnect() {
-    throw_on_error(natsConnection_Reconnect(conn_.get()), "natsConnection_Reconnect");
-  }
+  void reconnect() { throw_on_error(natsConnection_Reconnect(conn_.get()), "natsConnection_Reconnect"); }
 
   // True while the connection is up (not connecting, reconnecting, draining or closed).
   [[nodiscard]] bool connected() const noexcept {
@@ -306,16 +302,18 @@ class connection {
   }
 
   void publish_string(std::string_view subject, std::string_view payload) {
-    throw_on_error(natsConnection_PublishString(conn_.get(), std::string(subject).c_str(), std::string(payload).c_str()),
-                   "natsConnection_PublishString");
+    throw_on_error(
+        natsConnection_PublishString(conn_.get(), std::string(subject).c_str(), std::string(payload).c_str()),
+        "natsConnection_PublishString");
   }
 
   void publish_request(std::string_view subject, std::string_view reply_to, std::string_view payload) {
     if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
       throw std::invalid_argument("publish_request: payload exceeds INT_MAX bytes");
-    throw_on_error(natsConnection_PublishRequest(conn_.get(), std::string(subject).c_str(), std::string(reply_to).c_str(),
-                                                 payload.data(), static_cast<int>(payload.size())),
-                   "natsConnection_PublishRequest");
+    throw_on_error(
+        natsConnection_PublishRequest(conn_.get(), std::string(subject).c_str(), std::string(reply_to).c_str(),
+                                      payload.data(), static_cast<int>(payload.size())),
+        "natsConnection_PublishRequest");
   }
 
   void publish_request_string(std::string_view subject, std::string_view reply_to, std::string_view payload) {
@@ -409,7 +407,10 @@ class connection {
   [[nodiscard]] std::string client_ip() const {
     char* value = nullptr;
     throw_on_error(natsConnection_GetClientIP(conn_.get(), &value), "natsConnection_GetClientIP");
-    struct free_guard { char* p; ~free_guard() { std::free(p); } } guard{value};
+    struct free_guard {
+      char* p;
+      ~free_guard() { std::free(p); }
+    } guard{value};
     return value != nullptr ? std::string{value} : std::string{};
   }
 
@@ -427,7 +428,10 @@ class connection {
     char* ip = nullptr;
     int port = 0;
     throw_on_error(natsConnection_GetLocalIPAndPort(conn_.get(), &ip, &port), "natsConnection_GetLocalIPAndPort");
-    struct free_guard { char* p; ~free_guard() { std::free(p); } } guard{ip};
+    struct free_guard {
+      char* p;
+      ~free_guard() { std::free(p); }
+    } guard{ip};
     return {ip != nullptr ? std::string{ip} : std::string{}, port};
   }
 
@@ -441,12 +445,12 @@ class connection {
   [[nodiscard]] subscription subscribe_async_timeout(std::string_view subject, std::chrono::milliseconds timeout,
                                                      std::function<void(message)> handler) {
     std::string subj(subject);
-    return register_async_subscription(
-        std::move(handler), "natsConnection_SubscribeTimeout",
-        [this, subj, timeout](natsSubscription** raw, natsMsgHandler cb, void* closure) {
-          return natsConnection_SubscribeTimeout(raw, conn_.get(), subj.c_str(),
-                                                 static_cast<int64_t>(timeout.count()), cb, closure);
-        });
+    return register_async_subscription(std::move(handler), "natsConnection_SubscribeTimeout",
+                                       [this, subj, timeout](natsSubscription** raw, natsMsgHandler cb, void* closure) {
+                                         return natsConnection_SubscribeTimeout(raw, conn_.get(), subj.c_str(),
+                                                                                static_cast<int64_t>(timeout.count()),
+                                                                                cb, closure);
+                                       });
   }
 
   [[nodiscard]] subscription subscribe_queue_sync(std::string_view subject, std::string_view queue) {
@@ -474,20 +478,19 @@ class connection {
                                                    std::function<void(message)> handler) {
     std::string subj(subject);
     std::string q(queue);
-    return register_async_subscription(
-        std::move(handler), "natsConnection_QueueSubscribe",
-        [this, subj, q](natsSubscription** raw, natsMsgHandler cb, void* closure) {
-          return natsConnection_QueueSubscribe(raw, conn_.get(), subj.c_str(), q.c_str(), cb, closure);
-        });
+    return register_async_subscription(std::move(handler), "natsConnection_QueueSubscribe",
+                                       [this, subj, q](natsSubscription** raw, natsMsgHandler cb, void* closure) {
+                                         return natsConnection_QueueSubscribe(raw, conn_.get(), subj.c_str(), q.c_str(),
+                                                                              cb, closure);
+                                       });
   }
 
   [[nodiscard]] subscription subscribe_async(std::string_view subject, std::function<void(message)> handler) {
     std::string subj(subject);
-    return register_async_subscription(
-        std::move(handler), "natsConnection_Subscribe",
-        [this, subj](natsSubscription** raw, natsMsgHandler cb, void* closure) {
-          return natsConnection_Subscribe(raw, conn_.get(), subj.c_str(), cb, closure);
-        });
+    return register_async_subscription(std::move(handler), "natsConnection_Subscribe",
+                                       [this, subj](natsSubscription** raw, natsMsgHandler cb, void* closure) {
+                                         return natsConnection_Subscribe(raw, conn_.get(), subj.c_str(), cb, closure);
+                                       });
   }
 
   [[nodiscard]] subscription subscribe(std::string_view subject, std::function<void(message)> handler) {
@@ -533,21 +536,19 @@ class connection {
     return request_sync(subject, payload, timeout);
   }
 
-  [[nodiscard]] std::future<message> request_async(
-      std::string subject, std::string payload, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+  [[nodiscard]] std::future<message> request_async(std::string subject, std::string payload,
+                                                   std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
     if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
       throw std::invalid_argument("request_async: payload exceeds INT_MAX bytes");
     auto conn_ref = conn_;  // extend connection lifetime across the async call
-    return std::async(std::launch::async,
-                      [conn_ref, subject = std::move(subject), payload = std::move(payload), timeout]() {
-                        natsMsg* reply{};
-                        throw_on_error(
-                            natsConnection_Request(&reply, conn_ref.get(), subject.c_str(), payload.data(),
-                                                   static_cast<int>(payload.size()),
-                                                   static_cast<int64_t>(timeout.count())),
-                            "natsConnection_Request");
-                        return message{reply};
-                      });
+    return std::async(std::launch::async, [conn_ref, subject = std::move(subject), payload = std::move(payload),
+                                           timeout]() {
+      natsMsg* reply{};
+      throw_on_error(natsConnection_Request(&reply, conn_ref.get(), subject.c_str(), payload.data(),
+                                            static_cast<int>(payload.size()), static_cast<int64_t>(timeout.count())),
+                     "natsConnection_Request");
+      return message{reply};
+    });
   }
 
   [[nodiscard]] future_awaitable<message> request_awaitable(
@@ -562,27 +563,33 @@ class connection {
     natsInbox* inbox = nullptr;
     throw_on_error(natsInbox_Create(&inbox), "natsInbox_Create");
     // RAII guard ensures inbox is freed even if std::string construction throws OOM.
-    struct inbox_guard { natsInbox* p; ~inbox_guard() { natsInbox_Destroy(p); } } guard{inbox};
+    struct inbox_guard {
+      natsInbox* p;
+      ~inbox_guard() { natsInbox_Destroy(p); }
+    } guard{inbox};
     // natsInbox is typedef char, so natsInbox* is char* — no cast needed.
     return std::string{inbox};
   }
 
  private:
   template <typename SubscribeFn>
-  [[nodiscard]] subscription register_async_subscription(std::function<void(message)> handler,
-                                                         const char* context_name, const SubscribeFn& do_subscribe) {
+  [[nodiscard]] subscription register_async_subscription(std::function<void(message)> handler, const char* context_name,
+                                                         const SubscribeFn& do_subscribe) {
     return detail::make_async_subscription(std::move(handler), context_name, do_subscribe);
   }
 
-  [[nodiscard]] std::vector<std::string> fetch_server_list(
-      natsStatus (*getter)(natsConnection*, char***, int*)) const {
+  [[nodiscard]] std::vector<std::string> fetch_server_list(natsStatus (*getter)(natsConnection*, char***, int*)) const {
     char** values = nullptr;
     int count = 0;
     throw_on_error(getter(conn_.get(), &values, &count), "natsConnection_GetServers*");
     // RAII guard: free all strings and the array even if emplace_back throws.
     struct list_guard {
-      char** arr; int n;
-      ~list_guard() { for (int i = 0; i < n; ++i) std::free(arr[i]); std::free(arr); }
+      char** arr;
+      int n;
+      ~list_guard() {
+        for (int i = 0; i < n; ++i) std::free(arr[i]);
+        std::free(arr);
+      }
     } guard{.arr = values, .n = count};
 
     std::vector<std::string> out;
@@ -606,7 +613,9 @@ class connection {
   static void closed_cb_bridge(natsConnection* nc, void* closure) {
     std::unique_ptr<callback_handlers> handlers(static_cast<callback_handlers*>(closure));
     if (handlers->closed_cb) {
-      try { handlers->closed_cb(nc); } catch (...) {
+      try {
+        handlers->closed_cb(nc);
+      } catch (...) {
         std::fprintf(stderr, "[natscpp] exception in closed callback, ignoring\n");
       }
     }
@@ -615,7 +624,9 @@ class connection {
   static void disconnected_cb_bridge(natsConnection* nc, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->disconnected_cb) {
-      try { handlers->disconnected_cb(nc); } catch (...) {
+      try {
+        handlers->disconnected_cb(nc);
+      } catch (...) {
         std::fprintf(stderr, "[natscpp] exception in disconnected callback, ignoring\n");
       }
     }
@@ -624,7 +635,9 @@ class connection {
   static void reconnected_cb_bridge(natsConnection* nc, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->reconnected_cb) {
-      try { handlers->reconnected_cb(nc); } catch (...) {
+      try {
+        handlers->reconnected_cb(nc);
+      } catch (...) {
         std::fprintf(stderr, "[natscpp] exception in reconnected callback, ignoring\n");
       }
     }
@@ -633,7 +646,9 @@ class connection {
   static void error_handler_bridge(natsConnection* nc, natsSubscription* sub, natsStatus err, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->error_handler) {
-      try { handlers->error_handler(nc, sub, err); } catch (...) {
+      try {
+        handlers->error_handler(nc, sub, err);
+      } catch (...) {
         std::fprintf(stderr, "[natscpp] exception in error handler callback, ignoring\n");
       }
     }
@@ -642,7 +657,9 @@ class connection {
   static void lame_duck_mode_cb_bridge(natsConnection* nc, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->lame_duck_mode_cb) {
-      try { handlers->lame_duck_mode_cb(nc); } catch (...) {
+      try {
+        handlers->lame_duck_mode_cb(nc);
+      } catch (...) {
         std::fprintf(stderr, "[natscpp] exception in lame duck mode callback, ignoring\n");
       }
     }
@@ -651,7 +668,9 @@ class connection {
   static void discovered_servers_cb_bridge(natsConnection* nc, void* closure) {
     auto* handlers = static_cast<callback_handlers*>(closure);
     if (handlers->discovered_servers_cb) {
-      try { handlers->discovered_servers_cb(nc); } catch (...) {
+      try {
+        handlers->discovered_servers_cb(nc);
+      } catch (...) {
         std::fprintf(stderr, "[natscpp] exception in discovered servers callback, ignoring\n");
       }
     }
@@ -687,8 +706,9 @@ class connection {
       const char* seed_file = options.user_nkey_seed_file && !options.user_nkey_seed_file->empty()
                                   ? options.user_nkey_seed_file->c_str()
                                   : nullptr;
-      throw_on_error(::natsOptions_SetUserCredentialsFromFiles(nopts, options.user_credentials_file->c_str(), seed_file),
-                     "natsOptions_SetUserCredentialsFromFiles");
+      throw_on_error(
+          ::natsOptions_SetUserCredentialsFromFiles(nopts, options.user_credentials_file->c_str(), seed_file),
+          "natsOptions_SetUserCredentialsFromFiles");
     }
     if (options.user) {  // password is optional; nats.c accepts a NULL password
       throw_on_error(::natsOptions_SetUserInfo(nopts, options.user->c_str(),
@@ -781,8 +801,7 @@ class connection {
       throw_on_error(::natsOptions_SetMaxReconnect(nopts, *options.max_reconnect), "natsOptions_SetMaxReconnect");
     }
     if (options.allow_reconnect) {
-      throw_on_error(::natsOptions_SetAllowReconnect(nopts, *options.allow_reconnect),
-                     "natsOptions_SetAllowReconnect");
+      throw_on_error(::natsOptions_SetAllowReconnect(nopts, *options.allow_reconnect), "natsOptions_SetAllowReconnect");
     }
     if (options.no_randomize) {
       throw_on_error(::natsOptions_SetNoRandomize(nopts, *options.no_randomize), "natsOptions_SetNoRandomize");
@@ -795,9 +814,9 @@ class connection {
                      "natsOptions_SetReconnectBufSize");
     }
     if (options.reconnect_jitter) {
-      throw_on_error(::natsOptions_SetReconnectJitter(nopts, options.reconnect_jitter->first,
-                                                      options.reconnect_jitter->second),
-                     "natsOptions_SetReconnectJitter");
+      throw_on_error(
+          ::natsOptions_SetReconnectJitter(nopts, options.reconnect_jitter->first, options.reconnect_jitter->second),
+          "natsOptions_SetReconnectJitter");
     }
 
     // Subscription back-pressure

@@ -13,11 +13,12 @@ namespace natscpp {
 // nats.h defines nats_CheckCompatibility() as a function-like macro. The parentheses keep it from expanding here
 // without #undef-ing it for everyone; a call natscpp::nats_CheckCompatibility() still expands to
 // natscpp::nats_CheckCompatibilityImpl(...) below, which does the same check.
-inline bool (nats_CheckCompatibility)() {
+inline bool(nats_CheckCompatibility)() {
   return ::nats_CheckCompatibilityImpl(NATS_VERSION_REQUIRED_NUMBER, NATS_VERSION_NUMBER, NATS_VERSION_STRING);
 }
 
-[[nodiscard]] inline bool nats_CheckCompatibilityImpl(uint32_t req_ver_number, uint32_t ver_number, std::string_view ver_string) {
+[[nodiscard]] inline bool nats_CheckCompatibilityImpl(uint32_t req_ver_number, uint32_t ver_number,
+                                                      std::string_view ver_string) {
   return ::nats_CheckCompatibilityImpl(req_ver_number, ver_number, std::string(ver_string).c_str());
 }
 
@@ -61,8 +62,6 @@ inline natsStatus nats_Sign(std::string_view encoded_seed, std::string_view inpu
 
 inline void nats_Sleep(int64_t sleep_time) { ::nats_Sleep(sleep_time); }
 
-inline void nats_Sleep(std::chrono::milliseconds sleep_time) {
-  nats_Sleep(static_cast<int64_t>(sleep_time.count()));
-}
+inline void nats_Sleep(std::chrono::milliseconds sleep_time) { nats_Sleep(static_cast<int64_t>(sleep_time.count())); }
 
 }  // namespace natscpp

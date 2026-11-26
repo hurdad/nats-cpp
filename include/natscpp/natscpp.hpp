@@ -69,4 +69,3 @@
  * natscpp::inject_trace_context(carrier, trace_kv);
  * @endcode
  */
-

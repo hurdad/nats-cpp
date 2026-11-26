@@ -481,9 +481,8 @@ void test_connection_sync_and_async_roundtrip_if_server_available() {
   (void)sync_sub.get_stats();
 
   std::promise<std::string> async_data;
-  auto async_sub = nc.subscribe_async(async_subject, [&async_data](natscpp::message msg) {
-    async_data.set_value(std::string(msg.data()));
-  });
+  auto async_sub = nc.subscribe_async(
+      async_subject, [&async_data](natscpp::message msg) { async_data.set_value(std::string(msg.data())); });
   nc.publish(async_subject, "hello-async");
   assert(async_data.get_future().get() == "hello-async");
   async_sub.unsubscribe();
@@ -575,13 +574,13 @@ void test_subscribe_queue_sync_and_queue_async_timeout_if_server_available() {
   {
     const std::string subj = "natscpp.test.qatimeout." + ts;
     std::promise<std::string> received;
-    auto sub = nc.subscribe_queue_async_timeout(subj, "workers", std::chrono::seconds(10),
-                                                [&received](natscpp::message msg) {
-                                                  try {
-                                                    received.set_value(std::string(msg.data()));
-                                                  } catch (...) {
-                                                  }
-                                                });
+    auto sub =
+        nc.subscribe_queue_async_timeout(subj, "workers", std::chrono::seconds(10), [&received](natscpp::message msg) {
+          try {
+            received.set_value(std::string(msg.data()));
+          } catch (...) {
+          }
+        });
     nc.publish(subj, "queue-timeout-msg");
     assert(received.get_future().get() == "queue-timeout-msg");
     sub.unsubscribe();
@@ -621,7 +620,7 @@ void test_subscription_on_complete_callback_if_server_available() {
     std::promise<void> done;
     auto sub = nc.subscribe_async(subj, [](natscpp::message) {});
     sub.set_on_complete_callback([&count] { count += 100; });  // first — should be replaced
-    sub.set_on_complete_callback([&count, &done] {              // second — should fire
+    sub.set_on_complete_callback([&count, &done] {             // second — should fire
       count += 1;
       try {
         done.set_value();

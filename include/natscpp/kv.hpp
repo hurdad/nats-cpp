@@ -183,14 +183,14 @@ class kv_watcher {
  * @brief Configuration for creating a KV bucket.
  */
 struct kv_config {
-  std::string   bucket;
-  std::string   description;
-  int64_t       history        = 1;
-  int64_t       ttl_ns         = 0;   ///< TTL in nanoseconds; 0 = no expiry
-  int32_t       max_value_size = 0;   ///< 0 = unlimited
-  int64_t       max_bytes      = 0;   ///< 0 = unlimited
-  js_storage_type storage      = js_storage_type::file;
-  int           replicas       = 1;
+  std::string bucket;
+  std::string description;
+  int64_t history = 1;
+  int64_t ttl_ns = 0;          ///< TTL in nanoseconds; 0 = no expiry
+  int32_t max_value_size = 0;  ///< 0 = unlimited
+  int64_t max_bytes = 0;       ///< 0 = unlimited
+  js_storage_type storage = js_storage_type::file;
+  int replicas = 1;
 };
 
 // ---------------------------------------------------------------------------
@@ -223,13 +223,13 @@ class key_value {
     kvConfig cfg{};
     throw_on_error(kvConfig_Init(&cfg), "kvConfig_Init");
     const std::string bucket_name = config.bucket;
-    cfg.Bucket        = bucket_name.c_str();
-    cfg.History       = static_cast<uint8_t>(config.history);
-    cfg.TTL           = config.ttl_ns;
-    cfg.MaxValueSize  = config.max_value_size;
-    cfg.MaxBytes      = config.max_bytes;
-    cfg.StorageType   = static_cast<jsStorageType>(config.storage);
-    cfg.Replicas      = config.replicas;
+    cfg.Bucket = bucket_name.c_str();
+    cfg.History = static_cast<uint8_t>(config.history);
+    cfg.TTL = config.ttl_ns;
+    cfg.MaxValueSize = config.max_value_size;
+    cfg.MaxBytes = config.max_bytes;
+    cfg.StorageType = static_cast<jsStorageType>(config.storage);
+    cfg.Replicas = config.replicas;
     const std::string desc = config.description;
     if (!desc.empty()) cfg.Description = desc.c_str();
 
@@ -248,7 +248,7 @@ class key_value {
    */
   static key_value create(const connection& conn, std::string_view bucket, int64_t history = 1) {
     kv_config cfg;
-    cfg.bucket  = std::string(bucket);
+    cfg.bucket = std::string(bucket);
     cfg.history = history;
     return create(conn, cfg);
   }
@@ -279,9 +279,7 @@ class key_value {
     }
   }
 
-  ~key_value() {
-    destroy_self();
-  }
+  ~key_value() { destroy_self(); }
 
   key_value(const key_value&) = delete;
   key_value& operator=(const key_value&) = delete;
@@ -311,8 +309,7 @@ class key_value {
     check_valid();
     kvWatcher* watcher{};
     auto native_opts = to_native_watch_options(options);
-    throw_on_error(kvStore_Watch(&watcher, kv_, std::string(key).c_str(),
-                                 native_opts ? &*native_opts : nullptr),
+    throw_on_error(kvStore_Watch(&watcher, kv_, std::string(key).c_str(), native_opts ? &*native_opts : nullptr),
                    "kvStore_Watch");
     return kv_watcher{watcher};
   }
@@ -374,9 +371,9 @@ class key_value {
     check_valid();
     check_value_size(value);
     uint64_t rev{};
-    throw_on_error(
-        kvStore_Update(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size()), last_revision),
-        "kvStore_Update");
+    throw_on_error(kvStore_Update(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size()),
+                                  last_revision),
+                   "kvStore_Update");
     return rev;
   }
 
@@ -405,7 +402,10 @@ class key_value {
     check_valid();
     kvKeysList list{};
     throw_on_error(kvStore_Keys(&list, kv_, nullptr), "kvStore_Keys");
-    struct list_guard { kvKeysList& l; ~list_guard() { kvKeysList_Destroy(&l); } } guard{list};
+    struct list_guard {
+      kvKeysList& l;
+      ~list_guard() { kvKeysList_Destroy(&l); }
+    } guard{list};
     std::vector<std::string> out;
     out.reserve(static_cast<std::size_t>(list.Count));
     for (int i = 0; i < list.Count; ++i) {
@@ -429,7 +429,10 @@ class key_value {
     throw_on_error(kvStore_KeysWithFilters(&list, kv_, filter_ptrs.data(), static_cast<int>(filter_ptrs.size()),
                                            native_opts ? &*native_opts : nullptr),
                    "kvStore_KeysWithFilters");
-    struct list_guard { kvKeysList& l; ~list_guard() { kvKeysList_Destroy(&l); } } guard{list};
+    struct list_guard {
+      kvKeysList& l;
+      ~list_guard() { kvKeysList_Destroy(&l); }
+    } guard{list};
     std::vector<std::string> out;
     out.reserve(static_cast<std::size_t>(list.Count));
     for (int i = 0; i < list.Count; ++i) {
@@ -441,15 +444,17 @@ class key_value {
   /**
    * @brief Retrieve the full revision history of a key.
    */
-  [[nodiscard]] std::vector<kv_entry> history(std::string_view key,
-                                               const kv_watch_options* options = nullptr) const {
+  [[nodiscard]] std::vector<kv_entry> history(std::string_view key, const kv_watch_options* options = nullptr) const {
     check_valid();
     kvEntryList list{};
     auto native_opts = to_native_watch_options(options);
     throw_on_error(kvStore_History(&list, kv_, std::string(key).c_str(), native_opts ? &*native_opts : nullptr),
                    "kvStore_History");
     // Transfer ownership of each entry before the guard destroys the list.
-    struct list_guard { kvEntryList& l; ~list_guard() { kvEntryList_Destroy(&l); } } guard{list};
+    struct list_guard {
+      kvEntryList& l;
+      ~list_guard() { kvEntryList_Destroy(&l); }
+    } guard{list};
     std::vector<kv_entry> out;
     out.reserve(static_cast<std::size_t>(list.Count));
     for (int i = 0; i < list.Count; ++i) {
@@ -491,11 +496,11 @@ class key_value {
     std::unique_ptr<kvStatus, void (*)(kvStatus*)> holder(raw, kvStatus_Destroy);
     bucket_status out;
     const char* b = kvStatus_Bucket(raw);
-    out.bucket   = b != nullptr ? b : "";
-    out.values   = kvStatus_Values(raw);
-    out.history  = kvStatus_History(raw);
-    out.bytes    = kvStatus_Bytes(raw);
-    out.ttl      = kvStatus_TTL(raw);
+    out.bucket = b != nullptr ? b : "";
+    out.values = kvStatus_Values(raw);
+    out.history = kvStatus_History(raw);
+    out.bytes = kvStatus_Bytes(raw);
+    out.ttl = kvStatus_TTL(raw);
     out.replicas = kvStatus_Replicas(raw);
     return out;
   }
@@ -518,11 +523,11 @@ class key_value {
     }
     kvWatchOptions native{};
     throw_on_error(kvWatchOptions_Init(&native), "kvWatchOptions_Init");
-    native.IgnoreDeletes  = options->ignore_deletes;
+    native.IgnoreDeletes = options->ignore_deletes;
     native.IncludeHistory = options->include_history;
-    native.MetaOnly       = options->meta_only;
-    native.Timeout        = static_cast<int64_t>(options->timeout.count());
-    native.UpdatesOnly    = options->updates_only;
+    native.MetaOnly = options->meta_only;
+    native.Timeout = static_cast<int64_t>(options->timeout.count());
+    native.UpdatesOnly = options->updates_only;
     return native;
   }
 
@@ -533,7 +538,7 @@ class key_value {
     ctx_ = nullptr;
   }
 
-  jsCtx*   ctx_{};
+  jsCtx* ctx_{};
   kvStore* kv_{};
 };
 

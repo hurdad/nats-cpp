@@ -287,7 +287,10 @@ class subscription {
     natsMsgList list{};
     throw_on_error(natsSubscription_Fetch(&list, sub_.get(), batch, static_cast<int64_t>(timeout.count()), nullptr),
                    "natsSubscription_Fetch");
-    struct list_guard { natsMsgList& l; ~list_guard() { natsMsgList_Destroy(&l); } } guard{list};
+    struct list_guard {
+      natsMsgList& l;
+      ~list_guard() { natsMsgList_Destroy(&l); }
+    } guard{list};
 
     std::vector<message> out;
     out.reserve(static_cast<std::size_t>(list.Count));
@@ -302,7 +305,10 @@ class subscription {
     check_valid();
     natsMsgList list{};
     throw_on_error(natsSubscription_FetchRequest(&list, sub_.get(), &request), "natsSubscription_FetchRequest");
-    struct list_guard { natsMsgList& l; ~list_guard() { natsMsgList_Destroy(&l); } } guard{list};
+    struct list_guard {
+      natsMsgList& l;
+      ~list_guard() { natsMsgList_Destroy(&l); }
+    } guard{list};
 
     std::vector<message> out;
     out.reserve(static_cast<std::size_t>(list.Count));
@@ -322,7 +328,7 @@ class subscription {
     if (raw != nullptr) {
       std::unique_ptr<jsConsumerInfo, void (*)(jsConsumerInfo*)> holder(raw, jsConsumerInfo_Destroy);
       out.stream = raw->Stream != nullptr ? raw->Stream : "";
-      out.name   = raw->Name   != nullptr ? raw->Name   : "";
+      out.name = raw->Name != nullptr ? raw->Name : "";
     }
     return out;
   }
@@ -339,7 +345,6 @@ class subscription {
                                       .consumer_client_seq = mismatch.ConsumerClient,
                                       .consumer_server_seq = mismatch.ConsumerServer};
   }
-
 
  private:
   void check_valid() const {

@@ -34,8 +34,8 @@ struct eager_task {
 eager_task<std::string> ask(natscpp::connection& nc,  // NOLINT(cppcoreguidelines-avoid-reference-coroutine-parameters)
                             std::string question) {
   // Suspends here until the reply arrives (or the request fails, which rethrows from co_await).
-  natscpp::message reply = co_await nc.request_awaitable("demo.coro.echo", std::move(question),
-                                                         std::chrono::seconds(2));
+  natscpp::message reply =
+      co_await nc.request_awaitable("demo.coro.echo", std::move(question), std::chrono::seconds(2));
   co_return "reply: " + std::string(reply.data());
 }
 
