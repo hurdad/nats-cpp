@@ -215,6 +215,7 @@ if(NATSCPP_BUILD_TESTS)
     tests/unit_tests_server_features.cpp
     tests/unit_tests_tls_auth.cpp
     tests/unit_tests_regressions.cpp
+    tests/unit_tests_security.cpp
   )
   target_link_libraries(natscpp_unit_tests PRIVATE natscpp::natscpp)
   target_compile_options(natscpp_unit_tests PRIVATE ${_natscpp_warnings})

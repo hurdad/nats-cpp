@@ -21,8 +21,8 @@ std::vector<unit_tests::test_case> all_tests() {
   std::vector<unit_tests::test_case> tests;
   for (auto list :
        {unit_tests::core_unit_tests, unit_tests::api_surface_unit_tests, unit_tests::offline_regression_tests,
-        unit_tests::integration_tests, unit_tests::server_feature_tests, unit_tests::server_regression_tests,
-        unit_tests::tls_and_auth_tests}) {
+        unit_tests::security_unit_tests, unit_tests::integration_tests, unit_tests::server_feature_tests,
+        unit_tests::server_regression_tests, unit_tests::security_server_tests, unit_tests::tls_and_auth_tests}) {
     for (const auto& t : list()) tests.push_back(t);
   }
   return tests;

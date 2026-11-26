@@ -342,7 +342,7 @@ class jetstream {
     jsPubOptions pub_opts{};
     const bool has_opts = to_native_pub_options(opts, pub_opts);
     jsPubAck* ack{};
-    throw_on_error(js_Publish(&ack, ctx_, std::string(subject).c_str(), payload.data(),
+    throw_on_error(js_Publish(&ack, ctx_, detail::subject(subject, "jetstream::publish").c_str(), payload.data(),
                               static_cast<int>(payload.size()), has_opts ? &pub_opts : nullptr, nullptr),
                    "js_Publish");
     return extract_pub_ack(ack);
@@ -355,6 +355,7 @@ class jetstream {
     check_valid();
     jsPubOptions pub_opts{};
     const bool has_opts = to_native_pub_options(opts, pub_opts);
+    detail::check_outgoing(msg, "jetstream::publish_msg");
     jsPubAck* ack{};
     natsMsg* raw = msg.release();
     natsStatus status = js_PublishMsg(&ack, ctx_, raw, has_opts ? &pub_opts : nullptr, nullptr);
@@ -370,15 +371,15 @@ class jetstream {
   [[nodiscard]] js_pull_consumer pull_subscribe(std::string_view stream_subject, std::string_view durable_name) {
     check_valid();
     natsSubscription* sub{};
-    throw_on_error(js_PullSubscribe(&sub, ctx_, std::string(stream_subject).c_str(), std::string(durable_name).c_str(),
-                                    nullptr, nullptr, nullptr),
+    throw_on_error(js_PullSubscribe(&sub, ctx_, detail::c_string(stream_subject, "stream_subject").c_str(),
+                                    detail::c_string(durable_name, "durable_name").c_str(), nullptr, nullptr, nullptr),
                    "js_PullSubscribe");
     return js_pull_consumer{sub};
   }
 
   [[nodiscard]] js_push_consumer push_subscribe(std::string_view stream_subject, std::string_view durable_name) {
     check_valid();
-    std::string durable_str(durable_name);
+    std::string durable_str = detail::c_string(durable_name, "durable_name");
     jsSubOptions sub_opts{};
     throw_on_error(jsSubOptions_Init(&sub_opts), "jsSubOptions_Init");
     if (!durable_str.empty()) {
@@ -386,7 +387,7 @@ class jetstream {
     }
 
     natsSubscription* sub{};
-    throw_on_error(js_SubscribeSync(&sub, ctx_, std::string(stream_subject).c_str(), nullptr,
+    throw_on_error(js_SubscribeSync(&sub, ctx_, detail::c_string(stream_subject, "stream_subject").c_str(), nullptr,
                                     durable_str.empty() ? nullptr : &sub_opts, nullptr),
                    "js_SubscribeSync");
     return js_push_consumer{sub};
@@ -406,8 +407,8 @@ class jetstream {
   [[nodiscard]] subscription subscribe_async(std::string_view stream_subject, std::string_view durable_name,
                                              std::function<void(message)> handler, bool manual_ack = false) {
     check_valid();
-    std::string subject_str(stream_subject);
-    std::string durable_str(durable_name);
+    std::string subject_str = detail::subject(stream_subject, "jetstream::subscribe_async", true);
+    std::string durable_str = detail::c_string(durable_name, "durable_name");
     return detail::make_async_subscription(
         std::move(handler), "js_Subscribe",
         [this, &subject_str, &durable_str, manual_ack](natsSubscription** raw, natsMsgHandler cb, void* closure) {
@@ -463,20 +464,21 @@ class jetstream {
   void delete_stream(std::string_view name) {
     check_valid();
     if (name.empty()) throw std::invalid_argument("stream name cannot be empty");
-    throw_on_error(js_DeleteStream(ctx_, std::string(name).c_str(), nullptr, nullptr), "js_DeleteStream");
+    throw_on_error(js_DeleteStream(ctx_, detail::c_string(name, "name").c_str(), nullptr, nullptr), "js_DeleteStream");
   }
 
   void purge_stream(std::string_view name) {
     check_valid();
     if (name.empty()) throw std::invalid_argument("stream name cannot be empty");
-    throw_on_error(js_PurgeStream(ctx_, std::string(name).c_str(), nullptr, nullptr), "js_PurgeStream");
+    throw_on_error(js_PurgeStream(ctx_, detail::c_string(name, "name").c_str(), nullptr, nullptr), "js_PurgeStream");
   }
 
   [[nodiscard]] stream_info get_stream_info(std::string_view name) {
     check_valid();
     if (name.empty()) throw std::invalid_argument("stream name cannot be empty");
     jsStreamInfo* si_raw{};
-    throw_on_error(js_GetStreamInfo(&si_raw, ctx_, std::string(name).c_str(), nullptr, nullptr), "js_GetStreamInfo");
+    throw_on_error(js_GetStreamInfo(&si_raw, ctx_, detail::c_string(name, "name").c_str(), nullptr, nullptr),
+                   "js_GetStreamInfo");
     stream_info out;
     if (si_raw != nullptr) {
       std::unique_ptr<jsStreamInfo, void (*)(jsStreamInfo*)> holder(si_raw, jsStreamInfo_Destroy);
@@ -533,7 +535,8 @@ class jetstream {
   [[nodiscard]] message get_msg(std::string_view stream, uint64_t seq) {
     check_valid();
     natsMsg* msg{};
-    throw_on_error(js_GetMsg(&msg, ctx_, std::string(stream).c_str(), seq, nullptr, nullptr), "js_GetMsg");
+    throw_on_error(js_GetMsg(&msg, ctx_, detail::c_string(stream, "stream").c_str(), seq, nullptr, nullptr),
+                   "js_GetMsg");
     return message{msg};
   }
 
@@ -543,9 +546,9 @@ class jetstream {
   [[nodiscard]] message get_last_msg(std::string_view stream, std::string_view subject) {
     check_valid();
     natsMsg* msg{};
-    throw_on_error(
-        js_GetLastMsg(&msg, ctx_, std::string(stream).c_str(), std::string(subject).c_str(), nullptr, nullptr),
-        "js_GetLastMsg");
+    throw_on_error(js_GetLastMsg(&msg, ctx_, detail::c_string(stream, "stream").c_str(),
+                                 detail::c_string(subject, "subject").c_str(), nullptr, nullptr),
+                   "js_GetLastMsg");
     return message{msg};
   }
 
@@ -554,7 +557,8 @@ class jetstream {
    */
   void delete_msg(std::string_view stream, uint64_t seq) {
     check_valid();
-    throw_on_error(js_DeleteMsg(ctx_, std::string(stream).c_str(), seq, nullptr, nullptr), "js_DeleteMsg");
+    throw_on_error(js_DeleteMsg(ctx_, detail::c_string(stream, "stream").c_str(), seq, nullptr, nullptr),
+                   "js_DeleteMsg");
   }
 
   /**
@@ -562,7 +566,7 @@ class jetstream {
    */
   void erase_msg(std::string_view stream, uint64_t seq) {
     check_valid();
-    throw_on_error(js_EraseMsg(ctx_, std::string(stream).c_str(), seq, nullptr, nullptr), "js_EraseMsg");
+    throw_on_error(js_EraseMsg(ctx_, detail::c_string(stream, "stream").c_str(), seq, nullptr, nullptr), "js_EraseMsg");
   }
 
   // -------------------------------------------------------------------------
@@ -587,8 +591,8 @@ class jetstream {
     }
 
     jsConsumerInfo* consumer_info_raw{};
-    throw_on_error(js_GetConsumerInfo(&consumer_info_raw, ctx_, std::string(stream).c_str(),
-                                      std::string(durable_name).c_str(), nullptr, nullptr),
+    throw_on_error(js_GetConsumerInfo(&consumer_info_raw, ctx_, detail::c_string(stream, "stream").c_str(),
+                                      detail::c_string(durable_name, "durable_name").c_str(), nullptr, nullptr),
                    "js_GetConsumerInfo");
 
     consumer_info out{};
@@ -610,9 +614,9 @@ class jetstream {
       throw std::invalid_argument("consumer durable name cannot be empty");
     }
 
-    throw_on_error(
-        js_DeleteConsumer(ctx_, std::string(stream).c_str(), std::string(durable_name).c_str(), nullptr, nullptr),
-        "js_DeleteConsumer");
+    throw_on_error(js_DeleteConsumer(ctx_, detail::c_string(stream, "stream").c_str(),
+                                     detail::c_string(durable_name, "durable_name").c_str(), nullptr, nullptr),
+                   "js_DeleteConsumer");
   }
 
   [[nodiscard]] std::vector<consumer_info> list_consumer_groups(std::string_view stream) {
@@ -622,8 +626,9 @@ class jetstream {
     }
 
     jsConsumerInfoList* consumer_info_list_raw{};
-    throw_on_error(js_Consumers(&consumer_info_list_raw, ctx_, std::string(stream).c_str(), nullptr, nullptr),
-                   "js_Consumers");
+    throw_on_error(
+        js_Consumers(&consumer_info_list_raw, ctx_, detail::c_string(stream, "stream").c_str(), nullptr, nullptr),
+        "js_Consumers");
 
     std::vector<consumer_info> out;
     if (consumer_info_list_raw != nullptr) {
@@ -654,8 +659,9 @@ class jetstream {
     }
 
     jsConsumerNamesList* consumer_names_list_raw{};
-    throw_on_error(js_ConsumerNames(&consumer_names_list_raw, ctx_, std::string(stream).c_str(), nullptr, nullptr),
-                   "js_ConsumerNames");
+    throw_on_error(
+        js_ConsumerNames(&consumer_names_list_raw, ctx_, detail::c_string(stream, "stream").c_str(), nullptr, nullptr),
+        "js_ConsumerNames");
 
     std::vector<std::string> out;
     if (consumer_names_list_raw != nullptr) {

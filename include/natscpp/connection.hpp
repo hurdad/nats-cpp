@@ -21,6 +21,7 @@
 
 #include <natscpp/awaitable.hpp>
 #include <natscpp/detail/deleters.hpp>
+#include <natscpp/detail/validate.hpp>
 #include <natscpp/error.hpp>
 #include <natscpp/message.hpp>
 #include <natscpp/subscription.hpp>
@@ -292,33 +293,36 @@ class connection {
   void publish(std::string_view subject, std::string_view payload) {
     if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
       throw std::invalid_argument("publish: payload exceeds INT_MAX bytes");
-    throw_on_error(natsConnection_Publish(conn_.get(), std::string(subject).c_str(), payload.data(),
+    throw_on_error(natsConnection_Publish(conn_.get(), detail::subject(subject, "publish").c_str(), payload.data(),
                                           static_cast<int>(payload.size())),
                    "natsConnection_Publish");
   }
 
   void publish_string(std::string_view subject, std::string_view payload) {
-    throw_on_error(
-        natsConnection_PublishString(conn_.get(), std::string(subject).c_str(), std::string(payload).c_str()),
-        "natsConnection_PublishString");
+    throw_on_error(natsConnection_PublishString(conn_.get(), detail::subject(subject, "publish_string").c_str(),
+                                                detail::c_string(payload, "publish_string payload").c_str()),
+                   "natsConnection_PublishString");
   }
 
   void publish_request(std::string_view subject, std::string_view reply_to, std::string_view payload) {
     if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
       throw std::invalid_argument("publish_request: payload exceeds INT_MAX bytes");
-    throw_on_error(
-        natsConnection_PublishRequest(conn_.get(), std::string(subject).c_str(), std::string(reply_to).c_str(),
-                                      payload.data(), static_cast<int>(payload.size())),
-        "natsConnection_PublishRequest");
+    throw_on_error(natsConnection_PublishRequest(conn_.get(), detail::subject(subject, "publish_request").c_str(),
+                                                 detail::subject(reply_to, "publish_request reply_to").c_str(),
+                                                 payload.data(), static_cast<int>(payload.size())),
+                   "natsConnection_PublishRequest");
   }
 
   void publish_request_string(std::string_view subject, std::string_view reply_to, std::string_view payload) {
-    throw_on_error(natsConnection_PublishRequestString(conn_.get(), std::string(subject).c_str(),
-                                                       std::string(reply_to).c_str(), std::string(payload).c_str()),
-                   "natsConnection_PublishRequestString");
+    throw_on_error(
+        natsConnection_PublishRequestString(conn_.get(), detail::subject(subject, "publish_request_string").c_str(),
+                                            detail::subject(reply_to, "publish_request_string reply_to").c_str(),
+                                            detail::c_string(payload, "publish_request_string payload").c_str()),
+        "natsConnection_PublishRequestString");
   }
 
   void publish(message msg) {
+    detail::check_outgoing(msg, "publish");
     natsMsg* raw = msg.release();
     natsStatus status = natsConnection_PublishMsg(conn_.get(), raw);
     natsMsg_Destroy(raw);  // natsConnection_PublishMsg never takes ownership
@@ -342,8 +346,15 @@ class connection {
     return sig;
   }
 
-  void process_read_event() { natsConnection_ProcessReadEvent(conn_.get()); }
-  void process_write_event() { natsConnection_ProcessWriteEvent(conn_.get()); }
+  // For external event loops (natsOptions_SetEventLoop via customize_options). nats.c does not check for null here.
+  void process_read_event() {
+    if (conn_ == nullptr) throw nats_error(NATS_INVALID_ARG, "process_read_event: connection not initialized");
+    natsConnection_ProcessReadEvent(conn_.get());
+  }
+  void process_write_event() {
+    if (conn_ == nullptr) throw nats_error(NATS_INVALID_ARG, "process_write_event: connection not initialized");
+    natsConnection_ProcessWriteEvent(conn_.get());
+  }
 
   void drain() { throw_on_error(natsConnection_Drain(conn_.get()), "natsConnection_Drain"); }
   void drain(std::chrono::milliseconds timeout) {
@@ -388,10 +399,13 @@ class connection {
     return fetch_server_list(&natsConnection_GetDiscoveredServers);
   }
 
+  // The connection's last error ("" when there is none). Throws only for a connection that is not initialized.
   [[nodiscard]] std::string last_error() const {
-    const char* value = nullptr;
-    throw_on_error(natsConnection_GetLastError(conn_.get(), &value), "natsConnection_GetLastError");
-    return value != nullptr ? std::string(value) : std::string{};
+    if (conn_ == nullptr) throw nats_error(NATS_INVALID_ARG, "last_error: connection not initialized");
+    std::array<char, 1024> buf{};
+    // Returns the last error's status, not whether the call worked; the text is copied out under the lock.
+    if (natsConnection_ReadLastError(conn_.get(), buf.data(), buf.size()) == NATS_OK) return {};
+    return {buf.data()};
   }
 
   [[nodiscard]] uint64_t client_id() const {
@@ -433,14 +447,15 @@ class connection {
 
   [[nodiscard]] subscription subscribe_sync(std::string_view subject) {
     natsSubscription* raw{};
-    throw_on_error(natsConnection_SubscribeSync(&raw, conn_.get(), std::string(subject).c_str()),
-                   "natsConnection_SubscribeSync");
+    throw_on_error(
+        natsConnection_SubscribeSync(&raw, conn_.get(), detail::subject(subject, "subscribe_sync", true).c_str()),
+        "natsConnection_SubscribeSync");
     return subscription{raw};
   }
 
   [[nodiscard]] subscription subscribe_async_timeout(std::string_view subject, std::chrono::milliseconds timeout,
                                                      std::function<void(message)> handler) {
-    std::string subj(subject);
+    std::string subj = detail::subject(subject, "subscribe_async_timeout", true);
     return register_async_subscription(std::move(handler), "natsConnection_SubscribeTimeout",
                                        [this, subj, timeout](natsSubscription** raw, natsMsgHandler cb, void* closure) {
                                          return natsConnection_SubscribeTimeout(raw, conn_.get(), subj.c_str(),
@@ -451,17 +466,18 @@ class connection {
 
   [[nodiscard]] subscription subscribe_queue_sync(std::string_view subject, std::string_view queue) {
     natsSubscription* raw{};
-    throw_on_error(
-        natsConnection_QueueSubscribeSync(&raw, conn_.get(), std::string(subject).c_str(), std::string(queue).c_str()),
-        "natsConnection_QueueSubscribeSync");
+    throw_on_error(natsConnection_QueueSubscribeSync(&raw, conn_.get(),
+                                                     detail::subject(subject, "subscribe_queue_sync", true).c_str(),
+                                                     detail::c_string(queue, "subscribe_queue_sync queue").c_str()),
+                   "natsConnection_QueueSubscribeSync");
     return subscription{raw};
   }
 
   [[nodiscard]] subscription subscribe_queue_async_timeout(std::string_view subject, std::string_view queue,
                                                            std::chrono::milliseconds timeout,
                                                            std::function<void(message)> handler) {
-    std::string subj(subject);
-    std::string q(queue);
+    std::string subj = detail::subject(subject, "subscribe_queue_async_timeout", true);
+    std::string q = detail::c_string(queue, "subscribe_queue_async_timeout queue");
     return register_async_subscription(
         std::move(handler), "natsConnection_QueueSubscribeTimeout",
         [this, subj, q, timeout](natsSubscription** raw, natsMsgHandler cb, void* closure) {
@@ -472,8 +488,8 @@ class connection {
 
   [[nodiscard]] subscription subscribe_queue_async(std::string_view subject, std::string_view queue,
                                                    std::function<void(message)> handler) {
-    std::string subj(subject);
-    std::string q(queue);
+    std::string subj = detail::subject(subject, "subscribe_queue_async", true);
+    std::string q = detail::c_string(queue, "subscribe_queue_async queue");
     return register_async_subscription(std::move(handler), "natsConnection_QueueSubscribe",
                                        [this, subj, q](natsSubscription** raw, natsMsgHandler cb, void* closure) {
                                          return natsConnection_QueueSubscribe(raw, conn_.get(), subj.c_str(), q.c_str(),
@@ -482,7 +498,7 @@ class connection {
   }
 
   [[nodiscard]] subscription subscribe_async(std::string_view subject, std::function<void(message)> handler) {
-    std::string subj(subject);
+    std::string subj = detail::subject(subject, "subscribe_async", true);
     return register_async_subscription(std::move(handler), "natsConnection_Subscribe",
                                        [this, subj](natsSubscription** raw, natsMsgHandler cb, void* closure) {
                                          return natsConnection_Subscribe(raw, conn_.get(), subj.c_str(), cb, closure);
@@ -503,22 +519,25 @@ class connection {
     if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
       throw std::invalid_argument("request_sync: payload exceeds INT_MAX bytes");
     natsMsg* reply{};
-    throw_on_error(natsConnection_Request(&reply, conn_.get(), std::string(subject).c_str(), payload.data(),
-                                          static_cast<int>(payload.size()), static_cast<int64_t>(timeout.count())),
-                   "natsConnection_Request");
+    throw_on_error(
+        natsConnection_Request(&reply, conn_.get(), detail::subject(subject, "request").c_str(), payload.data(),
+                               static_cast<int>(payload.size()), static_cast<int64_t>(timeout.count())),
+        "natsConnection_Request");
     return message{reply};
   }
 
   [[nodiscard]] message request_string(std::string_view subject, std::string_view payload,
                                        std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
     natsMsg* reply{};
-    throw_on_error(natsConnection_RequestString(&reply, conn_.get(), std::string(subject).c_str(),
-                                                std::string(payload).c_str(), static_cast<int64_t>(timeout.count())),
+    throw_on_error(natsConnection_RequestString(&reply, conn_.get(), detail::subject(subject, "request_string").c_str(),
+                                                detail::c_string(payload, "request_string payload").c_str(),
+                                                static_cast<int64_t>(timeout.count())),
                    "natsConnection_RequestString");
     return message{reply};
   }
 
   [[nodiscard]] message request(message request_message, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+    detail::check_outgoing(request_message, "request");
     natsMsg* reply{};
     natsMsg* raw = request_message.release();
     natsStatus status = natsConnection_RequestMsg(&reply, conn_.get(), raw, static_cast<int64_t>(timeout.count()));
@@ -536,6 +555,7 @@ class connection {
                                                    std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
     if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
       throw std::invalid_argument("request_async: payload exceeds INT_MAX bytes");
+    subject = detail::subject(subject, "request_async");
     auto conn_ref = conn_;  // extend connection lifetime across the async call
     return std::async(std::launch::async, [conn_ref, subject = std::move(subject), payload = std::move(payload),
                                            timeout]() {

@@ -5,12 +5,15 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <natscpp/detail/deleters.hpp>
+#include <natscpp/detail/validate.hpp>
 #include <natscpp/error.hpp>
 
 namespace natscpp {
@@ -38,12 +41,16 @@ class message {
     // natsMsg_Create works without the library, but destroying the message needs it (nats.c's message
     // garbage collector), so a message created before any connection would crash when freed. nats_Open is a
     // no-op once the library is open.
+    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+      throw std::invalid_argument("message::create: payload exceeds INT_MAX bytes");
+    }
+    const std::string subj = detail::subject(subject, "message::create");
+    const std::string reply = reply_to.empty() ? std::string{} : detail::subject(reply_to, "message::create reply_to");
     throw_on_error(::nats_Open(-1), "nats_Open");
     natsMsg* raw{};
-    throw_on_error(
-        natsMsg_Create(&raw, std::string(subject).c_str(), reply_to.empty() ? nullptr : std::string(reply_to).c_str(),
-                       payload.data(), static_cast<int>(payload.size())),
-        "natsMsg_Create");
+    throw_on_error(natsMsg_Create(&raw, subj.c_str(), reply_to.empty() ? nullptr : reply.c_str(), payload.data(),
+                                  static_cast<int>(payload.size())),
+                   "natsMsg_Create");
     return message{raw};
   }
 
@@ -73,7 +80,7 @@ class message {
   [[nodiscard]] std::string header(std::string_view key) const {
     if (!msg_) return {};
     const char* val = nullptr;
-    if (natsMsgHeader_Get(msg_.get(), std::string(key).c_str(), &val) != NATS_OK || val == nullptr) {
+    if (natsMsgHeader_Get(msg_.get(), detail::c_string(key, "key").c_str(), &val) != NATS_OK || val == nullptr) {
       return {};
     }
     return std::string{val};
@@ -81,26 +88,29 @@ class message {
 
   void set_header(std::string_view key, std::string_view value) {
     if (!msg_) return;
-    throw_on_error(natsMsgHeader_Set(msg_.get(), std::string(key).c_str(), std::string(value).c_str()),
+    throw_on_error(natsMsgHeader_Set(msg_.get(), detail::header_key(key, "set_header").c_str(),
+                                     detail::header_value(value, "set_header").c_str()),
                    "natsMsgHeader_Set");
   }
 
   void add_header(std::string_view key, std::string_view value) {
     if (!msg_) return;
-    throw_on_error(natsMsgHeader_Add(msg_.get(), std::string(key).c_str(), std::string(value).c_str()),
+    throw_on_error(natsMsgHeader_Add(msg_.get(), detail::header_key(key, "add_header").c_str(),
+                                     detail::header_value(value, "add_header").c_str()),
                    "natsMsgHeader_Add");
   }
 
   void delete_header(std::string_view key) {
     if (!msg_) return;
-    throw_on_error(natsMsgHeader_Delete(msg_.get(), std::string(key).c_str()), "natsMsgHeader_Delete");
+    throw_on_error(natsMsgHeader_Delete(msg_.get(), detail::c_string(key, "key").c_str()), "natsMsgHeader_Delete");
   }
 
   [[nodiscard]] std::vector<std::string> header_values(std::string_view key) const {
     if (!msg_) return {};
     const char** values = nullptr;
     int count = 0;
-    throw_on_error(natsMsgHeader_Values(msg_.get(), std::string(key).c_str(), &values, &count), "natsMsgHeader_Values");
+    throw_on_error(natsMsgHeader_Values(msg_.get(), detail::c_string(key, "key").c_str(), &values, &count),
+                   "natsMsgHeader_Values");
     // nats.c allocates the outer array; free it even if the loop throws.
     struct array_free {
       const char** p;
@@ -186,5 +196,20 @@ class message {
  private:
   std::unique_ptr<natsMsg, detail::msg_deleter> msg_;
 };
+
+namespace detail {
+
+// A message built from a raw natsMsg skips message::create's checks, but its subjects still go into the
+// protocol line when it is sent: check them first (see detail/validate.hpp).
+inline void check_outgoing(const message& msg, const char* what) {
+  if (!msg.valid()) throw nats_error(NATS_INVALID_ARG, std::string(what) + ": message is not initialized");
+  const char* subj = natsMsg_GetSubject(msg.native_handle());
+  (void)subject(subj != nullptr ? subj : "", what);
+  if (const char* reply = natsMsg_GetReply(msg.native_handle()); reply != nullptr && *reply != '\0') {
+    (void)subject(reply, what);
+  }
+}
+
+}  // namespace detail
 
 }  // namespace natscpp

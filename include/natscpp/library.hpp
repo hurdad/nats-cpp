@@ -8,6 +8,8 @@
 #include <string>
 #include <string_view>
 
+#include <natscpp/detail/validate.hpp>
+
 namespace natscpp {
 
 // nats.h defines nats_CheckCompatibility() as a function-like macro. The parentheses keep it from expanding here
@@ -19,7 +21,7 @@ inline bool(nats_CheckCompatibility)() {
 
 [[nodiscard]] inline bool nats_CheckCompatibilityImpl(uint32_t req_ver_number, uint32_t ver_number,
                                                       std::string_view ver_string) {
-  return ::nats_CheckCompatibilityImpl(req_ver_number, ver_number, std::string(ver_string).c_str());
+  return ::nats_CheckCompatibilityImpl(req_ver_number, ver_number, detail::c_string(ver_string, "ver_string").c_str());
 }
 
 inline void nats_Close() { ::nats_Close(); }
@@ -54,10 +56,12 @@ inline void nats_ReleaseThreadMemory() { ::nats_ReleaseThreadMemory(); }
 
 inline natsStatus nats_SetMessageDeliveryPoolSize(int max) { return ::nats_SetMessageDeliveryPoolSize(max); }
 
-// nats.c takes input as a C string, so it ends at the first NUL byte.
+// nats.c takes the input as a C string, so input with a NUL byte is rejected (nats_error, NATS_INVALID_ARG)
+// rather than signed only up to that byte.
 inline natsStatus nats_Sign(std::string_view encoded_seed, std::string_view input, unsigned char** signature,
                             int* signature_length) {
-  return ::nats_Sign(std::string(encoded_seed).c_str(), std::string(input).c_str(), signature, signature_length);
+  return ::nats_Sign(detail::c_string(encoded_seed, "nats_Sign seed").c_str(),
+                     detail::c_string(input, "nats_Sign input").c_str(), signature, signature_length);
 }
 
 inline void nats_Sleep(int64_t sleep_time) { ::nats_Sleep(sleep_time); }

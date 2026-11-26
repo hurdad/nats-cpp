@@ -27,6 +27,7 @@ client: core NATS, JetStream and KeyValue, with RAII handles and sync, callback 
   - [Trace propagation](#trace-propagation)
   - [Coroutines](#coroutines)
   - [Library utilities](#library-utilities)
+- [Input validation](#input-validation)
 - [Threading and callback lifetimes](#threading-and-callback-lifetimes)
 - [Includes](#includes)
 - [Development](#development)
@@ -742,6 +743,23 @@ natscpp::nats_SetMessageDeliveryPoolSize(8);
 int64_t now_ms = natscpp::nats_Now();
 int64_t now_ns = natscpp::nats_NowInNanoSeconds();
 ```
+
+## Input validation
+
+nats.c writes subjects and header keys into the NATS protocol without checking them when publishing, and takes
+all text as C strings. natscpp checks text before handing it to nats.c, so input from untrusted sources cannot
+inject protocol lines or headers, or be silently cut short:
+
+| Input | Rule | Error |
+|---|---|---|
+| Publish / request subjects and reply subjects | non-empty, no whitespace or control characters, no empty tokens, no `*` / `>` | `NATS_INVALID_SUBJECT` |
+| Subscribe subjects | the same, but `*` and `>` allowed as whole tokens (`>` last) | `NATS_INVALID_SUBJECT` |
+| Header keys | visible ASCII without `:` | `NATS_INVALID_ARG` |
+| Header values | no CR, LF or NUL | `NATS_INVALID_ARG` |
+| Everything else (names, keys, queue groups, string payloads, `nats_Sign` input) | no NUL bytes | `NATS_INVALID_ARG` |
+
+All of these throw `natscpp::nats_error`. `publish(message)`, `request(message)` and `publish_msg` also check
+messages that were built from a raw `natsMsg`.
 
 ## Threading and callback lifetimes
 

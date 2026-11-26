@@ -257,7 +257,7 @@ class key_value {
     jsCtx* ctx = nullptr;
     throw_on_error(natsConnection_JetStream(&ctx, conn.native_handle(), nullptr), "natsConnection_JetStream");
     try {
-      throw_on_error(js_DeleteKeyValue(ctx, std::string(bucket).c_str()), "js_DeleteKeyValue");
+      throw_on_error(js_DeleteKeyValue(ctx, detail::c_string(bucket, "bucket").c_str()), "js_DeleteKeyValue");
     } catch (...) {
       detail::destroy_kv_context(ctx);
       throw;
@@ -271,7 +271,7 @@ class key_value {
   key_value(const connection& conn, std::string_view bucket) {
     throw_on_error(natsConnection_JetStream(&ctx_, conn.native_handle(), nullptr), "natsConnection_JetStream");
     try {
-      throw_on_error(js_KeyValue(&kv_, ctx_, std::string(bucket).c_str()), "js_KeyValue");
+      throw_on_error(js_KeyValue(&kv_, ctx_, detail::c_string(bucket, "bucket").c_str()), "js_KeyValue");
     } catch (...) {
       detail::destroy_kv_context(ctx_);
       ctx_ = nullptr;
@@ -309,8 +309,9 @@ class key_value {
     check_valid();
     kvWatcher* watcher{};
     auto native_opts = to_native_watch_options(options);
-    throw_on_error(kvStore_Watch(&watcher, kv_, std::string(key).c_str(), native_opts ? &*native_opts : nullptr),
-                   "kvStore_Watch");
+    throw_on_error(
+        kvStore_Watch(&watcher, kv_, detail::c_string(key, "key").c_str(), native_opts ? &*native_opts : nullptr),
+        "kvStore_Watch");
     return kv_watcher{watcher};
   }
 
@@ -345,7 +346,7 @@ class key_value {
   [[nodiscard]] kv_entry get(std::string_view key) const {
     check_valid();
     kvEntry* entry{};
-    throw_on_error(kvStore_Get(&entry, kv_, std::string(key).c_str()), "kvStore_Get");
+    throw_on_error(kvStore_Get(&entry, kv_, detail::c_string(key, "key").c_str()), "kvStore_Get");
     return kv_entry{entry};
   }
 
@@ -353,8 +354,9 @@ class key_value {
     check_valid();
     check_value_size(value);
     uint64_t rev{};
-    throw_on_error(kvStore_Put(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size())),
-                   "kvStore_Put");
+    throw_on_error(
+        kvStore_Put(&rev, kv_, detail::c_string(key, "key").c_str(), value.data(), static_cast<int>(value.size())),
+        "kvStore_Put");
     return rev;
   }
 
@@ -362,8 +364,9 @@ class key_value {
     check_valid();
     check_value_size(value);
     uint64_t rev{};
-    throw_on_error(kvStore_Create(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size())),
-                   "kvStore_Create");
+    throw_on_error(
+        kvStore_Create(&rev, kv_, detail::c_string(key, "key").c_str(), value.data(), static_cast<int>(value.size())),
+        "kvStore_Create");
     return rev;
   }
 
@@ -371,8 +374,8 @@ class key_value {
     check_valid();
     check_value_size(value);
     uint64_t rev{};
-    throw_on_error(kvStore_Update(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size()),
-                                  last_revision),
+    throw_on_error(kvStore_Update(&rev, kv_, detail::c_string(key, "key").c_str(), value.data(),
+                                  static_cast<int>(value.size()), last_revision),
                    "kvStore_Update");
     return rev;
   }
@@ -380,18 +383,19 @@ class key_value {
   [[nodiscard]] kv_entry get_revision(std::string_view key, uint64_t revision) const {
     check_valid();
     kvEntry* entry{};
-    throw_on_error(kvStore_GetRevision(&entry, kv_, std::string(key).c_str(), revision), "kvStore_GetRevision");
+    throw_on_error(kvStore_GetRevision(&entry, kv_, detail::c_string(key, "key").c_str(), revision),
+                   "kvStore_GetRevision");
     return kv_entry{entry};
   }
 
   void erase(std::string_view key) {
     check_valid();
-    throw_on_error(kvStore_Delete(kv_, std::string(key).c_str()), "kvStore_Delete");
+    throw_on_error(kvStore_Delete(kv_, detail::c_string(key, "key").c_str()), "kvStore_Delete");
   }
 
   void purge(std::string_view key) {
     check_valid();
-    throw_on_error(kvStore_Purge(kv_, std::string(key).c_str(), nullptr), "kvStore_Purge");
+    throw_on_error(kvStore_Purge(kv_, detail::c_string(key, "key").c_str(), nullptr), "kvStore_Purge");
   }
 
   // -------------------------------------------------------------------------
@@ -448,8 +452,9 @@ class key_value {
     check_valid();
     kvEntryList list{};
     auto native_opts = to_native_watch_options(options);
-    throw_on_error(kvStore_History(&list, kv_, std::string(key).c_str(), native_opts ? &*native_opts : nullptr),
-                   "kvStore_History");
+    throw_on_error(
+        kvStore_History(&list, kv_, detail::c_string(key, "key").c_str(), native_opts ? &*native_opts : nullptr),
+        "kvStore_History");
     // Transfer ownership of each entry before the guard destroys the list.
     struct list_guard {
       kvEntryList& l;

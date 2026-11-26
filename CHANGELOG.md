@@ -2,7 +2,26 @@
 
 ## 0.2.0
 
+### Security
+- **NATS protocol injection through subjects.** nats.c checks subjects when subscribing but not when
+  publishing, so a subject or reply subject containing a space, tab or CR/LF (for example one built from
+  untrusted input) was written into the protocol as-is and could publish additional messages to other subjects
+  with the connection's permissions. Every publish and request path (`publish*`, `request*`, `publish(message)`,
+  `message::create`, `jetstream::publish`/`publish_msg`) now rejects such subjects, and wildcards, with
+  `nats_error` `NATS_INVALID_SUBJECT`.
+- **Header injection.** nats.c writes header keys into the protocol unchecked, so a key containing CR/LF could
+  add headers of the caller's choosing, including JetStream ones such as `Nats-Msg-Id`. Header keys must now be
+  visible ASCII without `:`, and values may not contain CR, LF or NUL (`NATS_INVALID_ARG`).
+- **Silent truncation at NUL bytes.** Every `std::string_view` argument passed to nats.c as a C string was cut
+  at its first NUL byte, so what was sent, looked up or signed (`nats_Sign`) could differ from what the
+  application checked. Such arguments are now rejected with `NATS_INVALID_ARG`.
+
 ### Fixed
+- `connection::last_error()` threw whenever the connection had an error, so it could never return one. It now
+  returns the error text (empty when there is none), using `natsConnection_ReadLastError`.
+- `process_read_event()` / `process_write_event()` on a connection that is not initialized crashed in nats.c;
+  they now throw `NATS_INVALID_ARG`.
+- `message::create()` rejects payloads over `INT_MAX` bytes instead of truncating the length.
 - `message::create()` before any connection crashed when the message was destroyed: nats.c frees messages
   through its library state, which only opening a connection initialized. `create()` now opens the library.
 - **Use-after-free in async subscriptions.** Destroying, move-assigning or unsubscribing a `subscription`

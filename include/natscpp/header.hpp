@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <natscpp/detail/deleters.hpp>
+#include <natscpp/detail/validate.hpp>
 #include <natscpp/error.hpp>
 
 namespace natscpp {
@@ -26,20 +27,22 @@ class header {
 
   void set(std::string_view key, std::string_view value) {
     check_valid();
-    throw_on_error(::natsHeader_Set(native_handle(), std::string(key).c_str(), std::string(value).c_str()),
+    throw_on_error(::natsHeader_Set(native_handle(), detail::header_key(key, "header::set").c_str(),
+                                    detail::header_value(value, "header::set").c_str()),
                    "natsHeader_Set");
   }
 
   void add(std::string_view key, std::string_view value) {
     check_valid();
-    throw_on_error(::natsHeader_Add(native_handle(), std::string(key).c_str(), std::string(value).c_str()),
+    throw_on_error(::natsHeader_Add(native_handle(), detail::header_key(key, "header::add").c_str(),
+                                    detail::header_value(value, "header::add").c_str()),
                    "natsHeader_Add");
   }
 
   [[nodiscard]] std::string get(std::string_view key) const {
     check_valid();
     const char* value = nullptr;
-    throw_on_error(::natsHeader_Get(native_handle(), std::string(key).c_str(), &value), "natsHeader_Get");
+    throw_on_error(::natsHeader_Get(native_handle(), detail::c_string(key, "key").c_str(), &value), "natsHeader_Get");
     return value != nullptr ? std::string{value} : std::string{};
   }
 
@@ -47,7 +50,8 @@ class header {
     check_valid();
     const char** vals = nullptr;
     int count = 0;
-    throw_on_error(::natsHeader_Values(native_handle(), std::string(key).c_str(), &vals, &count), "natsHeader_Values");
+    throw_on_error(::natsHeader_Values(native_handle(), detail::c_string(key, "key").c_str(), &vals, &count),
+                   "natsHeader_Values");
     struct array_free {
       const char** p;
       ~array_free() { std::free(const_cast<char**>(p)); }
@@ -84,7 +88,7 @@ class header {
 
   void erase(std::string_view key) {
     check_valid();
-    throw_on_error(::natsHeader_Delete(native_handle(), std::string(key).c_str()), "natsHeader_Delete");
+    throw_on_error(::natsHeader_Delete(native_handle(), detail::c_string(key, "key").c_str()), "natsHeader_Delete");
   }
 
   void destroy() { reset(); }

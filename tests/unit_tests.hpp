@@ -27,6 +27,8 @@ std::vector<test_case> integration_tests();
 std::vector<test_case> server_feature_tests();
 std::vector<test_case> server_regression_tests();
 std::vector<test_case> tls_and_auth_tests();
+std::vector<test_case> security_unit_tests();
+std::vector<test_case> security_server_tests();
 
 // Set by skip(); the runner exits with skip_exit_code when a test skipped, so CTest reports it as skipped.
 inline std::atomic<bool> skipped{false};
