@@ -1,53 +1,68 @@
+// JetStream push consumer with a callback: jetstream::subscribe_async runs the handler on a nats.c thread
+// for each message. With manual_ack the handler acknowledges (or naks) each message itself.
+#include <atomic>
+#include <chrono>
 #include <future>
 #include <iostream>
+#include <string>
 
 #include <natscpp/connection.hpp>
 #include <natscpp/jetstream.hpp>
 
+#include "example_common.hpp"
+
 // Delivery pattern: WORK QUEUE
-//   A single durable consumer is shared across all subscribers. NATS delivers each message to
-//   exactly one subscriber (competing consumers). This is the pattern shown below.
-//
-// To implement PUB/SUB fan-out instead:
-//   Create a separate consumer group per subscriber, each with a unique durable name and
-//   deliver_subject. Every subscriber then independently receives every message.
-//
-//     js.create_consumer_group({.stream = "STREAM", .durable_name = "worker-a",
-//                                .filter_subject = subject,
-//                                .deliver_subject = "delivery.a", .type = push});
-//     js.create_consumer_group({.stream = "STREAM", .durable_name = "worker-b",
-//                                .filter_subject = subject,
-//                                .deliver_subject = "delivery.b", .type = push});
-//     auto consumer_a = js.push_subscribe(subject, "worker-a");
-//     auto consumer_b = js.push_subscribe(subject, "worker-b");
-//     // consumer_a and consumer_b each receive every published message
+//   One durable consumer shared by every subscriber: each message goes to exactly one of them. For PUB/SUB
+//   fan-out, give each subscriber its own durable consumer (and deliver_subject); each then receives every
+//   message.
 
 int main() {
-  natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
-  natscpp::jetstream js(nc);
+  return example::run([] {
+    natscpp::connection nc({.url = example::server_url()});
+    natscpp::jetstream js(nc);
 
-  constexpr auto subject = "demo.js.async.push.events";
-  constexpr auto durable = "demo-js-async-push-worker";
+    constexpr auto stream = "DEMO_JS_ASYNC_PUSH";
+    constexpr auto subject = "demo.js.async.push.events";
+    constexpr auto durable = "demo-js-async-push-worker";
+    constexpr int total = 3;
 
-  [[maybe_unused]] auto stream = js.create_stream({.name = "DEMO_JS_ASYNC_PUSH", .subjects = {"demo.js.async.push.>"}});
-  [[maybe_unused]] auto consumer_group = js.create_consumer_group({
-      .stream = "DEMO_JS_ASYNC_PUSH",
-      .durable_name = durable,
-      .filter_subject = subject,
-      .deliver_subject = "deliver.js.async.push",
-      .type = natscpp::js_consumer_type::push,
+    (void)js.create_stream({.name = stream, .subjects = {"demo.js.async.push.>"}});
+    example::scope_exit cleanup([&] { js.delete_stream(stream); });
+    (void)js.create_consumer_group({
+        .stream = stream,
+        .durable_name = durable,
+        .filter_subject = subject,
+        .deliver_subject = "deliver.js.async.push",
+        .type = natscpp::js_consumer_type::push,
+    });
+
+    std::atomic<int> received{0};
+    std::promise<void> all_received;
+    auto sub = js.subscribe_async(
+        subject, durable,
+        [&](natscpp::message msg) {
+          std::cout << "jetstream async push received: " << msg.data() << '\n';
+          msg.ack();
+          if (++received == total) all_received.set_value();  // redeliveries past total are just acked
+        },
+        /*manual_ack=*/true);
+
+    for (int i = 1; i <= total; ++i) {
+      (void)js.publish(subject, "event-" + std::to_string(i));
+    }
+    const bool ok = all_received.get_future().wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+
+    // The handler uses locals of this function, so make sure it has finished for good before they go out of
+    // scope: unsubscribe, then wait for the on-complete callback, which runs after the handler's last return.
+    std::promise<void> completed;
+    sub.set_on_complete_callback([&completed] { completed.set_value(); });
+    sub.unsubscribe();
+    completed.get_future().wait();
+
+    if (!ok) {
+      std::cerr << "received only " << received << " of " << total << " messages\n";
+      return 1;
+    }
+    return 0;
   });
-
-  auto consumer = js.push_subscribe(subject, durable);
-
-  // Start waiting for the message before publishing so the receive does not block the main thread.
-  auto next_msg = std::async(std::launch::async, [&consumer] {
-    return consumer.next(std::chrono::seconds(2));
-  });
-
-  (void)js.publish(subject, "hello-jetstream-async-push");
-
-  auto msg = next_msg.get();
-  std::cout << "jetstream async push received: " << msg.data() << '\n';
-  return 0;
 }

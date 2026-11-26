@@ -132,18 +132,23 @@ struct connection_options {
     token_handler_cb = handler;
     token_handler_closure = closure;
   }
-  void set_nkey(std::string nkey_public, natsSignatureHandler sig_cb, void* sig_closure) {
-    this->nkey_public = std::move(nkey_public);
+  void set_nkey(std::string public_key, natsSignatureHandler sig_cb, void* sig_closure) {
+    nkey_public = std::move(public_key);
     nkey_signature_cb = sig_cb;
     nkey_signature_closure = sig_closure;
   }
-  void set_user_credentials_from_files(std::string user_credentials_file, std::string seed_file = {}) {
-    this->user_credentials_file = std::move(user_credentials_file);
-    user_nkey_seed_file = std::move(seed_file);
+  // seed_file empty: the seed is read from user_credentials_file (a chained .creds file).
+  void set_user_credentials_from_files(std::string credentials_file, std::string seed_file = {}) {
+    user_credentials_file = std::move(credentials_file);
+    if (seed_file.empty()) {
+      user_nkey_seed_file.reset();
+    } else {
+      user_nkey_seed_file = std::move(seed_file);
+    }
   }
-  void set_user_info(std::string user, std::string password) {
-    this->user = std::move(user);
-    this->password = std::move(password);
+  void set_user_info(std::string user_name, std::string user_password) {
+    user = std::move(user_name);
+    password = std::move(user_password);
   }
   void set_secure(bool s) { this->secure = s; }
   void load_ca_trusted_certificates(std::string file_name) { ca_trusted_certificates_file = std::move(file_name); }
@@ -242,8 +247,11 @@ class connection {
     throw_on_error(natsOptions_Create(&nopts), "natsOptions_Create");
     std::unique_ptr<natsOptions, void (*)(natsOptions*)> holder(nopts, natsOptions_Destroy);
 
-    // Build handlers on the heap so the pointer stored in nats.c remains valid after a move.
-    auto handlers = std::make_shared<callback_handlers>();
+    // nats.c runs connection callbacks on its own thread, and posts the closed callback — always the last one —
+    // after natsConnection_Destroy has returned. So the handlers belong to nats.c once connected and are freed
+    // by closed_cb_bridge, which is always installed for that reason. (A customize_options hook that replaces
+    // the closed callback leaks them instead.)
+    auto handlers = std::make_unique<callback_handlers>();
     handlers->closed_cb = options.closed_cb;
     handlers->disconnected_cb = options.disconnected_cb;
     handlers->reconnected_cb = options.reconnected_cb;
@@ -252,11 +260,14 @@ class connection {
     handlers->discovered_servers_cb = options.discovered_servers_cb;
 
     apply_nats_options(nopts, options, handlers.get());
-    throw_on_error(natsConnection_Connect(&raw, nopts), "natsConnection_Connect");
-    // Capture handlers in the deleter so they outlive the natsConnection even when
-    // request_async (or any other code) holds conn_ beyond this object's lifetime.
-    conn_.reset(raw, [h = handlers](natsConnection* p) { natsConnection_Destroy(p); });
-    callback_handlers_ = std::move(handlers);
+    const natsStatus status = natsConnection_Connect(&raw, nopts);
+    // NATS_NOT_YET_CONNECTED: retry-on-failed-connect with a connected callback (set through customize_options)
+    // returns a connection that is still connecting in the background.
+    if (status != NATS_NOT_YET_CONNECTED) {
+      throw_on_error(status, "natsConnection_Connect");  // on failure nats.c never runs the closed callback
+    }
+    [[maybe_unused]] callback_handlers* owned_by_nats = handlers.release();  // freed in closed_cb_bridge
+    conn_.reset(raw, detail::connection_deleter{});
   }
 
   /**
@@ -266,7 +277,10 @@ class connection {
     throw_on_error(natsConnection_Reconnect(conn_.get()), "natsConnection_Reconnect");
   }
 
-  [[nodiscard]] bool connected() const noexcept { return conn_ != nullptr; }
+  // True while the connection is up (not connecting, reconnecting, draining or closed).
+  [[nodiscard]] bool connected() const noexcept {
+    return conn_ != nullptr && natsConnection_Status(conn_.get()) == NATS_CONN_STATUS_CONNECTED;
+  }
   [[nodiscard]] natsConnection* native_handle() const noexcept { return conn_.get(); }
   [[nodiscard]] bool is_closed() const noexcept { return conn_ == nullptr || natsConnection_IsClosed(conn_.get()); }
   [[nodiscard]] bool is_reconnecting() const noexcept {
@@ -365,14 +379,14 @@ class connection {
     std::array<char, 4096> buf{};
     throw_on_error(natsConnection_GetConnectedUrl(conn_.get(), buf.data(), static_cast<int>(buf.size())),
                    "natsConnection_GetConnectedUrl");
-    return std::string(buf.data());
+    return {buf.data()};
   }
 
   [[nodiscard]] std::string connected_server_id() const {
     std::array<char, 4096> buf{};
     throw_on_error(natsConnection_GetConnectedServerId(conn_.get(), buf.data(), static_cast<int>(buf.size())),
                    "natsConnection_GetConnectedServerId");
-    return std::string(buf.data());
+    return {buf.data()};
   }
 
   [[nodiscard]] std::vector<std::string> servers() const { return fetch_server_list(&natsConnection_GetServers); }
@@ -406,7 +420,7 @@ class connection {
   }
 
   [[nodiscard]] bool has_header_support() const noexcept {
-    return conn_ != nullptr && natsConnection_HasHeaderSupport(conn_.get());
+    return conn_ != nullptr && natsConnection_HasHeaderSupport(conn_.get()) == NATS_OK;  // NATS_OK = supported
   }
 
   [[nodiscard]] std::pair<std::string, int> local_ip_and_port() const {
@@ -446,7 +460,8 @@ class connection {
   [[nodiscard]] subscription subscribe_queue_async_timeout(std::string_view subject, std::string_view queue,
                                                            std::chrono::milliseconds timeout,
                                                            std::function<void(message)> handler) {
-    std::string subj(subject), q(queue);
+    std::string subj(subject);
+    std::string q(queue);
     return register_async_subscription(
         std::move(handler), "natsConnection_QueueSubscribeTimeout",
         [this, subj, q, timeout](natsSubscription** raw, natsMsgHandler cb, void* closure) {
@@ -457,7 +472,8 @@ class connection {
 
   [[nodiscard]] subscription subscribe_queue_async(std::string_view subject, std::string_view queue,
                                                    std::function<void(message)> handler) {
-    std::string subj(subject), q(queue);
+    std::string subj(subject);
+    std::string q(queue);
     return register_async_subscription(
         std::move(handler), "natsConnection_QueueSubscribe",
         [this, subj, q](natsSubscription** raw, natsMsgHandler cb, void* closure) {
@@ -542,7 +558,7 @@ class connection {
   /**
    * @brief Generates a NATS inbox subject.
    */
-  [[nodiscard]] std::string new_inbox() const {
+  [[nodiscard]] static std::string new_inbox() {
     natsInbox* inbox = nullptr;
     throw_on_error(natsInbox_Create(&inbox), "natsInbox_Create");
     // RAII guard ensures inbox is freed even if std::string construction throws OOM.
@@ -552,34 +568,10 @@ class connection {
   }
 
  private:
-  // Shared callback dispatched by all async subscriptions. Always null-guards msg
-  // (natsConnection_SubscribeTimeout delivers a null msg to signal timeout expiry).
-  // nats.c passes ownership of msg to the callback; wrapping it in message{} ensures
-  // natsMsg_Destroy is called via the unique_ptr deleter when the user is done with it.
-  static void async_msg_callback(natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
-    if (msg == nullptr) { return; }
-    auto* fn = static_cast<std::function<void(message)>*>(closure);
-    try {
-      (*fn)(message{msg});
-    } catch (...) {
-      std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
-    }
-  }
-
-  // Common registration logic shared by all four async subscribe variants.
-  // do_subscribe(natsSubscription**, natsMsgHandler, void*) → natsStatus
   template <typename SubscribeFn>
   [[nodiscard]] subscription register_async_subscription(std::function<void(message)> handler,
-                                                         const char* context_name,
-                                                         SubscribeFn do_subscribe) {
-    // The subscription owns its handler (via on_release), so the closure pointer nats.c holds stays valid exactly
-    // as long as the natsSubscription does, independent of this connection object's lifetime or moves.
-    auto token = std::make_shared<std::function<void(message)>>(std::move(handler));
-
-    natsSubscription* raw{};
-    throw_on_error(do_subscribe(&raw, &async_msg_callback, token.get()), context_name);
-
-    return subscription{raw, [token = std::move(token)]() mutable { token.reset(); }};
+                                                         const char* context_name, const SubscribeFn& do_subscribe) {
+    return detail::make_async_subscription(std::move(handler), context_name, do_subscribe);
   }
 
   [[nodiscard]] std::vector<std::string> fetch_server_list(
@@ -591,7 +583,7 @@ class connection {
     struct list_guard {
       char** arr; int n;
       ~list_guard() { for (int i = 0; i < n; ++i) std::free(arr[i]); std::free(arr); }
-    } guard{values, count};
+    } guard{.arr = values, .n = count};
 
     std::vector<std::string> out;
     out.reserve(static_cast<std::size_t>(count));
@@ -610,8 +602,9 @@ class connection {
     std::function<void(natsConnection*)> discovered_servers_cb;
   };
 
+  // Always installed: the closed callback is the last one nats.c makes for a connection, so it frees the handlers.
   static void closed_cb_bridge(natsConnection* nc, void* closure) {
-    auto* handlers = static_cast<callback_handlers*>(closure);
+    std::unique_ptr<callback_handlers> handlers(static_cast<callback_handlers*>(closure));
     if (handlers->closed_cb) {
       try { handlers->closed_cb(nc); } catch (...) {
         std::fprintf(stderr, "[natscpp] exception in closed callback, ignoring\n");
@@ -690,7 +683,10 @@ class connection {
                      "natsOptions_SetNKey");
     }
     if (options.user_credentials_file) {
-      const char* seed_file = options.user_nkey_seed_file ? options.user_nkey_seed_file->c_str() : nullptr;
+      // An empty seed file name means "none": nats.c would otherwise try to open "" when signing.
+      const char* seed_file = options.user_nkey_seed_file && !options.user_nkey_seed_file->empty()
+                                  ? options.user_nkey_seed_file->c_str()
+                                  : nullptr;
       throw_on_error(::natsOptions_SetUserCredentialsFromFiles(nopts, options.user_credentials_file->c_str(), seed_file),
                      "natsOptions_SetUserCredentialsFromFiles");
     }
@@ -754,9 +750,7 @@ class connection {
 #endif
 
     // Callbacks
-    if (options.closed_cb) {
-      throw_on_error(::natsOptions_SetClosedCB(nopts, &closed_cb_bridge, handlers), "natsOptions_SetClosedCB");
-    }
+    throw_on_error(::natsOptions_SetClosedCB(nopts, &closed_cb_bridge, handlers), "natsOptions_SetClosedCB");
     if (options.disconnected_cb) {
       throw_on_error(::natsOptions_SetDisconnectedCB(nopts, &disconnected_cb_bridge, handlers),
                      "natsOptions_SetDisconnectedCB");
@@ -880,7 +874,6 @@ class connection {
   }
 
   std::shared_ptr<natsConnection> conn_;
-  std::shared_ptr<callback_handlers> callback_handlers_;
 };
 
 }  // namespace natscpp

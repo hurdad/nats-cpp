@@ -1,0 +1,8 @@
+# ThreadSanitizer suppressions for code natscpp does not own.
+#
+# The system OpenSSL (libcrypto) is not built with -fsanitize=thread, so TSan cannot see its internal
+# synchronization and reports its own lock objects being freed (nats.c destroying an SSL_CTX on its async
+# callback thread) as races.
+called_from_lib:libcrypto.so
+called_from_lib:libssl.so
+race:CRYPTO_THREAD_lock_free

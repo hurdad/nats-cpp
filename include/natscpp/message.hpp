@@ -61,7 +61,7 @@ class message {
 
   [[nodiscard]] std::string_view data() const noexcept {
     if (!msg_) return {};
-    const char* bytes = reinterpret_cast<const char*>(natsMsg_GetData(msg_.get()));
+    const char* bytes = natsMsg_GetData(msg_.get());
     const int len = natsMsg_GetDataLength(msg_.get());
     return bytes != nullptr && len >= 0 ? std::string_view{bytes, static_cast<std::size_t>(len)} : std::string_view{};
   }

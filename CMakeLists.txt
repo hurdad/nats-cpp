@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(natscpp
-  VERSION 0.1.2
+  VERSION 0.2.0
   DESCRIPTION "Modern header-only C++20 wrapper for nats.c"
   LANGUAGES CXX)
 
@@ -26,7 +26,19 @@ set(NATSCPP_NATS_BACKEND "auto" CACHE STRING
   "nats.c backend: auto | system | bundled")
 set_property(CACHE NATSCPP_NATS_BACKEND PROPERTY STRINGS auto system bundled)
 
-include(CTest)
+# Tests and examples are only built by default when natscpp is the top-level project, so that
+# add_subdirectory(natscpp) does not add natscpp's own targets to a parent build.
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  set(_natscpp_top_level ON)
+  include(CTest)  # defines BUILD_TESTING (default ON)
+  set(_natscpp_tests_default ${BUILD_TESTING})
+else()
+  set(_natscpp_top_level OFF)
+  set(_natscpp_tests_default OFF)
+endif()
+option(NATSCPP_BUILD_TESTS "Build natscpp's tests" ${_natscpp_tests_default})
+option(NATSCPP_BUILD_EXAMPLES "Build natscpp examples" ${_natscpp_top_level})
+option(NATSCPP_WARNINGS_AS_ERRORS "Treat warnings in natscpp's own tests and examples as errors" OFF)
 
 # ── Common dependencies ─────────────────────────────────────────────────────
 
@@ -66,26 +78,33 @@ endif()
 if(_natscpp_use_bundled)
   # ── Bundled submodule (static) ───────────────────────────────────────────
 
-  # Save the user's BUILD_TESTING preference before nats.c forces it off.
-  set(_natscpp_build_testing "${BUILD_TESTING}")
-
-  set(NATS_BUILD_LIB_SHARED OFF CACHE BOOL "" FORCE)
-  set(NATS_BUILD_LIB_STATIC ON  CACHE BOOL "" FORCE)
-  set(NATS_BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
-  set(NATS_BUILD_STREAMING  OFF CACHE BOOL "" FORCE)
+  # nats.c's options are set as normal variables, scoped to this configure step: nats.c requires CMake 3.13,
+  # so its option() calls honor them (CMP0077) and nothing is forced into the parent project's cache.
+  set(_natscpp_saved_build_testing "${BUILD_TESTING}")
+  set(NATS_BUILD_LIB_SHARED OFF)
+  set(NATS_BUILD_LIB_STATIC ON)
+  set(NATS_BUILD_EXAMPLES   OFF)
+  set(NATS_BUILD_STREAMING  OFF)
   if(NATSCPP_BUNDLED_WITH_TLS AND NOT OpenSSL_FOUND)
     message(FATAL_ERROR "NATSCPP_BUNDLED_WITH_TLS=ON but OpenSSL was not found")
   endif()
-  set(NATS_BUILD_WITH_TLS ${NATSCPP_BUNDLED_WITH_TLS} CACHE BOOL "" FORCE)
+  set(NATS_BUILD_WITH_TLS ${NATSCPP_BUNDLED_WITH_TLS})
   set(NATSCPP_LINKS_OPENSSL ${NATSCPP_BUNDLED_WITH_TLS})
   set(_natscpp_has_tls ${NATSCPP_BUNDLED_WITH_TLS})
   message(STATUS "natscpp: bundled nats.c TLS support: ${NATSCPP_BUNDLED_WITH_TLS}")
-  set(NATS_BUILD_WITH_DEPRECATED OFF CACHE BOOL "" FORCE)
-  set(BUILD_TESTING         OFF CACHE BOOL "" FORCE)
+  set(NATS_BUILD_WITH_DEPRECATED OFF)
+  set(BUILD_TESTING OFF)  # nats.c's own test suite
 
   add_subdirectory("${NATS_C_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/third_party/nats.c")
   target_link_libraries(natscpp INTERFACE nats_static)
   set_target_properties(nats_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  # nats.c is vendored code we do not patch: keep its warnings (e.g. GCC 15's -Wdiscarded-qualifiers) out of
+  # our builds. natscpp's own code is built with full warnings (see _natscpp_warnings below).
+  if(MSVC)
+    target_compile_options(nats_static PRIVATE /w)
+  else()
+    target_compile_options(nats_static PRIVATE -w)
+  endif()
 
   # nats.c's source tree has src/nats.h but no nats/nats.h, which is what
   # natscpp includes (and what an installed nats.c provides). Generate a
@@ -98,8 +117,11 @@ if(_natscpp_use_bundled)
   target_include_directories(natscpp
     INTERFACE $<BUILD_INTERFACE:${_natscpp_shim_dir}>)
 
-  # Restore the user's preference now that the nats.c subdir is done.
-  set(BUILD_TESTING "${_natscpp_build_testing}" CACHE BOOL "" FORCE)
+  if(DEFINED _natscpp_saved_build_testing AND NOT _natscpp_saved_build_testing STREQUAL "")
+    set(BUILD_TESTING "${_natscpp_saved_build_testing}")
+  else()
+    unset(BUILD_TESTING)
+  endif()
 
 else()
   # ── System nats.c via its cmake package ─────────────────────────────────
@@ -153,7 +175,24 @@ endif()
 
 # ── Tests ───────────────────────────────────────────────────────────────────
 
-if(BUILD_TESTING)
+# Warnings for natscpp's own targets (the headers are compiled as part of these).
+set(_natscpp_warnings)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  set(_natscpp_warnings -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align
+                        -Woverloaded-virtual -Wnull-dereference -Wimplicit-fallthrough
+                        -Wno-missing-field-initializers)  # designated initializers leave the rest defaulted
+  if(NATSCPP_WARNINGS_AS_ERRORS)
+    list(APPEND _natscpp_warnings -Werror)
+  endif()
+elseif(MSVC)
+  set(_natscpp_warnings /W4 /permissive-)
+  if(NATSCPP_WARNINGS_AS_ERRORS)
+    list(APPEND _natscpp_warnings /WX)
+  endif()
+endif()
+
+if(NATSCPP_BUILD_TESTS)
+  enable_testing()
   add_executable(natscpp_unit_tests
     tests/unit_tests_main.cpp
     tests/unit_tests_core.cpp
@@ -161,8 +200,10 @@ if(BUILD_TESTING)
     tests/unit_tests_integration.cpp
     tests/unit_tests_server_features.cpp
     tests/unit_tests_tls_auth.cpp
+    tests/unit_tests_regressions.cpp
   )
   target_link_libraries(natscpp_unit_tests PRIVATE natscpp::natscpp)
+  target_compile_options(natscpp_unit_tests PRIVATE ${_natscpp_warnings})
   if(OpenSSL_FOUND)
     target_link_libraries(natscpp_unit_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto)  # TLS test callback
   endif()
@@ -175,38 +216,30 @@ endif()
 
 # ── Examples ────────────────────────────────────────────────────────────────
 
-option(NATSCPP_BUILD_EXAMPLES "Build natscpp examples" ON)
-
 if(NATSCPP_BUILD_EXAMPLES)
-  add_executable(natscpp_sync_example examples/sync_example.cpp)
-  target_link_libraries(natscpp_sync_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_async_example examples/async_example.cpp)
-  target_link_libraries(natscpp_async_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_jetstream_sync_pull_example examples/jetstream_sync_pull_example.cpp)
-  target_link_libraries(natscpp_jetstream_sync_pull_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_jetstream_sync_push_example examples/jetstream_sync_push_example.cpp)
-  target_link_libraries(natscpp_jetstream_sync_push_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_jetstream_async_pull_example examples/jetstream_async_pull_example.cpp)
-  target_link_libraries(natscpp_jetstream_async_pull_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_jetstream_async_push_example examples/jetstream_async_push_example.cpp)
-  target_link_libraries(natscpp_jetstream_async_push_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_kv_example examples/kv_example.cpp)
-  target_link_libraries(natscpp_kv_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_request_reply_example examples/request_reply_example.cpp)
-  target_link_libraries(natscpp_request_reply_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_request_reply_server_example examples/request_reply_server_example.cpp)
-  target_link_libraries(natscpp_request_reply_server_example PRIVATE natscpp::natscpp)
-
-  add_executable(natscpp_request_reply_client_example examples/request_reply_client_example.cpp)
-  target_link_libraries(natscpp_request_reply_client_example PRIVATE natscpp::natscpp)
+  # Each examples/<name>.cpp builds natscpp_<name>; they expect a server at $NATS_URL (default
+  # nats://127.0.0.1:4222).
+  set(_natscpp_examples
+    sync_example
+    async_example
+    request_reply_example
+    request_reply_server_example
+    request_reply_client_example
+    headers_trace_example
+    queue_group_example
+    lifecycle_example
+    secure_connection_example
+    coroutine_example
+    jetstream_sync_pull_example
+    jetstream_sync_push_example
+    jetstream_async_pull_example
+    jetstream_async_push_example
+    kv_example)
+  foreach(_example IN LISTS _natscpp_examples)
+    add_executable(natscpp_${_example} examples/${_example}.cpp)
+    target_link_libraries(natscpp_${_example} PRIVATE natscpp::natscpp)
+    target_compile_options(natscpp_${_example} PRIVATE ${_natscpp_warnings})
+  endforeach()
 endif()
 
 # ── Install ─────────────────────────────────────────────────────────────────

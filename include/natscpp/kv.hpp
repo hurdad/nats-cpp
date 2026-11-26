@@ -5,10 +5,12 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <natscpp/connection.hpp>
@@ -150,7 +152,7 @@ class kv_watcher {
       throw_on_error(kvWatcher_Next(&entry, watcher_, timeout_ms), "kvWatcher_Next");
       return kv_entry{entry};
     }
-    constexpr int64_t slice_ms = 60 * 60 * 1000;
+    constexpr int64_t slice_ms = int64_t{60} * 60 * 1000;  // one hour
     natsStatus status = NATS_TIMEOUT;
     while ((status = kvWatcher_Next(&entry, watcher_, slice_ms)) == NATS_TIMEOUT) {
     }
@@ -203,7 +205,7 @@ class key_value {
     uint64_t history = 0;
     uint64_t bytes = 0;
     int64_t ttl = 0;
-    int replicas = 0;
+    int64_t replicas = 0;
   };
 
   key_value() = default;
@@ -213,7 +215,7 @@ class key_value {
    */
   static key_value create(const connection& conn, const kv_config& config) {
     // kvConfig.History is a uint8_t: reject values that would silently wrap (nats.c enforces its own maximum).
-    if (config.history < 0 || config.history > std::numeric_limits<uint8_t>::max()) {
+    if (config.history < 0 || std::cmp_greater(config.history, std::numeric_limits<uint8_t>::max())) {
       throw nats_error(NATS_INVALID_ARG, "kv_config: history out of range");
     }
     key_value out;
@@ -352,6 +354,7 @@ class key_value {
 
   [[nodiscard]] uint64_t put(std::string_view key, std::string_view value) {
     check_valid();
+    check_value_size(value);
     uint64_t rev{};
     throw_on_error(kvStore_Put(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size())),
                    "kvStore_Put");
@@ -360,6 +363,7 @@ class key_value {
 
   [[nodiscard]] uint64_t create(std::string_view key, std::string_view value) {
     check_valid();
+    check_value_size(value);
     uint64_t rev{};
     throw_on_error(kvStore_Create(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size())),
                    "kvStore_Create");
@@ -368,6 +372,7 @@ class key_value {
 
   [[nodiscard]] uint64_t update(std::string_view key, std::string_view value, uint64_t last_revision) {
     check_valid();
+    check_value_size(value);
     uint64_t rev{};
     throw_on_error(
         kvStore_Update(&rev, kv_, std::string(key).c_str(), value.data(), static_cast<int>(value.size()), last_revision),
@@ -500,6 +505,11 @@ class key_value {
     if (kv_ == nullptr) {
       throw nats_error(NATS_INVALID_ARG, "key_value: not initialized");
     }
+  }
+
+  static void check_value_size(std::string_view value) {
+    if (value.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      throw std::invalid_argument("key_value: value exceeds INT_MAX bytes");
   }
 
   [[nodiscard]] static std::optional<kvWatchOptions> to_native_watch_options(const kv_watch_options* options) {

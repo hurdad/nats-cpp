@@ -12,6 +12,8 @@ void run_api_surface_unit_tests();
 void run_integration_tests();
 void run_server_feature_tests();
 void run_tls_and_auth_tests();
+void run_offline_regression_tests();
+void run_server_regression_tests();
 
 // Environment variable value, or "" when unset.
 inline std::string env(const char* name) {

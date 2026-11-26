@@ -6,6 +6,13 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   NATS_SERVER_VERSION: v2.10.22
 
@@ -20,20 +27,52 @@ jobs:
           # Bundled nats.c (third_party/nats.c) in every job; no system libnats.
           - name: debug-asan-ubsan
             build_type: Debug
+            cxx: g++
+            std: 20
             cmake_args: >-
               -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
               -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
             ctest_args: ""
-          - name: release
+            run_examples: true
+          - name: tsan
+            build_type: Debug
+            cxx: g++
+            std: 20
+            # nats.c is instrumented too, so races across the C boundary are visible.
+            cmake_args: >-
+              -DCMAKE_CXX_FLAGS="-fsanitize=thread -O1 -g"
+              -DCMAKE_C_FLAGS="-fsanitize=thread -O1 -g"
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+            ctest_args: ""
+            run_examples: true
+          - name: release-cxx20
             build_type: Release
+            cxx: g++
+            std: 20
+            cmake_args: ""
+            ctest_args: ""
+          - name: release-cxx23
+            build_type: Release
+            cxx: g++
+            std: 23
+            cmake_args: ""
+            ctest_args: ""
+          - name: clang-cxx23
+            build_type: Debug
+            cxx: clang++
+            std: 23
             cmake_args: ""
             ctest_args: ""
           - name: no-tls
             build_type: Debug
+            cxx: g++
+            std: 20
             cmake_args: -DNATSCPP_BUNDLED_WITH_TLS=OFF
             ctest_args: -E natscpp_tls_auth   # TLS tests need a TLS-enabled nats.c
           - name: coverage
             build_type: Debug
+            cxx: g++
+            std: 20
             cmake_args: -DCMAKE_CXX_FLAGS="--coverage -O0"
             ctest_args: ""
             coverage: true
@@ -62,7 +101,11 @@ jobs:
         run: >-
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCMAKE_CXX_STANDARD=${{ matrix.std }}
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
           -DNATSCPP_NATS_BACKEND=bundled
+          -DNATSCPP_WARNINGS_AS_ERRORS=ON
           ${{ matrix.cmake_args }}
 
       - name: Build
@@ -74,16 +117,39 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/ci/lsan.supp:print_suppressions=1
           UBSAN_OPTIONS: print_stacktrace=1
-        run: ctest --test-dir build --output-on-failure ${{ matrix.ctest_args }}
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:suppressions=${{ github.workspace }}/tests/ci/tsan.supp
+        run: ctest --test-dir build --output-on-failure --output-junit junit.xml ${{ matrix.ctest_args }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}   # failed runs are the ones worth seeing
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: build/junit.xml
+          flags: ${{ matrix.name }}
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Run examples
+        if: matrix.run_examples
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/ci/lsan.supp
+          TSAN_OPTIONS: halt_on_error=1:suppressions=${{ github.workspace }}/tests/ci/tsan.supp
+        run: tests/ci/run-examples.sh build
 
       - name: Coverage report
         if: matrix.coverage
         run: |
-          gcovr -r . --object-directory build --filter 'include/natscpp/' \
-            --gcov-ignore-parse-errors=all --txt-metric branch --print-summary \
-            --html-details coverage.html --cobertura coverage.xml
-          { echo '```'; gcovr -r . --object-directory build --filter 'include/natscpp/' \
-              --gcov-ignore-parse-errors=all; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # Throw/unreachable branches are the compiler's exception edges (every std::string can throw
+          # bad_alloc); excluding them makes the branch figure reflect natscpp's own decisions.
+          opts=(-r . --object-directory build --filter 'include/natscpp/' --gcov-ignore-parse-errors=all
+                --exclude-throw-branches --exclude-unreachable-branches)
+          gcovr "${opts[@]}" --txt-metric branch --print-summary \
+            --html-details coverage.html --cobertura coverage.xml \
+            --fail-under-line 95 --fail-under-branch 80
+          { echo '```'; gcovr "${opts[@]}"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage to Codecov
         if: matrix.coverage
@@ -91,6 +157,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
+          flags: coverage
           disable_search: true
           fail_ci_if_error: false   # a Codecov outage or missing token must not fail the build
 
@@ -104,3 +171,71 @@ jobs:
       - name: Server logs
         if: failure()
         run: tail -n 50 "$RUNNER_TEMP"/nats/*.log || true
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev shellcheck
+          # Pinned so formatting and diagnostics do not drift with the runner image.
+          pipx install clang-format==21.1.8
+          pipx install clang-tidy==21.1.6
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          sudo install actionlint /usr/local/bin/
+
+      - name: clang-format
+        run: git ls-files '*.hpp' '*.cpp' ':!:third_party' | xargs clang-format --dry-run --Werror
+
+      - name: clang-tidy
+        run: |
+          cmake -S . -B build -DNATSCPP_NATS_BACKEND=bundled -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          run-clang-tidy -quiet -p build -j "$(nproc)" tests/ examples/
+
+      - name: shellcheck
+        run: shellcheck tests/ci/*.sh
+
+      - name: actionlint
+        run: actionlint
+
+  install:
+    name: install + find_package consumer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      - name: Build and install
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNATSCPP_NATS_BACKEND=bundled \
+            -DNATSCPP_BUILD_TESTS=OFF -DNATSCPP_BUILD_EXAMPLES=OFF
+          cmake --build build --parallel
+          cmake --install build --prefix "$RUNNER_TEMP/prefix"
+
+      - name: Consume with find_package
+        run: |
+          cmake -S tests/install_consumer -B consumer -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
+          cmake --build consumer
+          ./consumer/natscpp_install_consumer
+
+      - name: Consume with add_subdirectory
+        run: |
+          cmake -S tests/subdirectory_consumer -B subdir -DNATSCPP_NATS_BACKEND=bundled
+          cmake --build subdir
+          ./subdir/natscpp_subdirectory_consumer
+          # natscpp's own tests and examples must not be part of a parent build.
+          if cmake --build subdir --target help | grep -E 'natscpp_(unit_tests|sync_example)'; then
+            echo "natscpp tests/examples leaked into the parent project"; exit 1
+          fi

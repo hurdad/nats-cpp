@@ -1,44 +1,51 @@
+// JetStream pull consumer, blocking API: publish a few messages, fetch them in one batch, acknowledge each.
 #include <chrono>
 #include <iostream>
+#include <string>
 
 #include <natscpp/connection.hpp>
 #include <natscpp/jetstream.hpp>
 
+#include "example_common.hpp"
+
 // Delivery pattern: WORK QUEUE
-//   A single durable consumer is shared across all subscribers. NATS delivers each message to
-//   exactly one subscriber (competing consumers). This is the pattern shown below.
-//
-// To implement PUB/SUB fan-out instead:
-//   Create a separate consumer group per subscriber, each with a unique durable name. Every
-//   subscriber then independently receives every message.
-//
-//     js.create_consumer_group({.stream = "STREAM", .durable_name = "worker-a",
-//                                .filter_subject = subject, .type = pull});
-//     js.create_consumer_group({.stream = "STREAM", .durable_name = "worker-b",
-//                                .filter_subject = subject, .type = pull});
-//     auto consumer_a = js.pull_subscribe(subject, "worker-a");
-//     auto consumer_b = js.pull_subscribe(subject, "worker-b");
-//     // consumer_a and consumer_b each receive every published message
+//   One durable consumer shared by every subscriber: each message goes to exactly one of them (competing
+//   consumers). For PUB/SUB fan-out, give each subscriber its own durable consumer instead; each then receives
+//   every message.
 
 int main() {
-  natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
-  natscpp::jetstream js(nc);
+  return example::run([] {
+    natscpp::connection nc({.url = example::server_url()});
+    natscpp::jetstream js(nc);
 
-  constexpr auto subject = "demo.js.sync.pull.events";
-  constexpr auto durable = "demo-js-sync-pull-worker";
+    constexpr auto stream = "DEMO_JS_SYNC_PULL";
+    constexpr auto subject = "demo.js.sync.pull.events";
+    constexpr auto durable = "demo-js-sync-pull-worker";
 
-  [[maybe_unused]] auto stream = js.create_stream({.name = "DEMO_JS_SYNC_PULL", .subjects = {"demo.js.sync.pull.>"}});
-  [[maybe_unused]] auto consumer_group = js.create_consumer_group({
-      .stream = "DEMO_JS_SYNC_PULL",
-      .durable_name = durable,
-      .filter_subject = subject,
-      .type = natscpp::js_consumer_type::pull,
+    (void)js.create_stream({.name = stream, .subjects = {"demo.js.sync.pull.>"}});
+    example::scope_exit cleanup([&] { js.delete_stream(stream); });  // the demo leaves nothing behind
+    (void)js.create_consumer_group({
+        .stream = stream,
+        .durable_name = durable,
+        .filter_subject = subject,
+        .type = natscpp::js_consumer_type::pull,
+    });
+
+    auto consumer = js.pull_subscribe(subject, durable);
+    for (int i = 1; i <= 3; ++i) {
+      auto ack = js.publish(subject, "order-" + std::to_string(i));  // waits for the stream to store it
+      std::cout << "stored seq " << ack.sequence << " in " << ack.stream << '\n';
+    }
+
+    // One pull request for up to 10 messages; returns once the available ones have arrived.
+    int received = 0;
+    while (received < 3) {
+      for (auto& msg : consumer.fetch(10, std::chrono::seconds(2))) {
+        std::cout << "jetstream sync pull received: " << msg.data() << '\n';
+        msg.ack();  // explicit ack policy: unacknowledged messages are redelivered after the ack wait
+        ++received;
+      }
+    }
+    return 0;
   });
-
-  auto consumer = js.pull_subscribe(subject, durable);
-  (void)js.publish(subject, "hello-jetstream-sync-pull");
-
-  auto msg = consumer.next(std::chrono::seconds(2));
-  std::cout << "jetstream sync pull received: " << msg.data() << '\n';
-  return 0;
 }

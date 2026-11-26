@@ -14,10 +14,12 @@ int main(int argc, char** argv) {
   if (all || group == "unit") {
     unit_tests::run_core_unit_tests();
     unit_tests::run_api_surface_unit_tests();
+    unit_tests::run_offline_regression_tests();
   }
   if (all || group == "integration") {
     unit_tests::run_integration_tests();
     unit_tests::run_server_feature_tests();
+    unit_tests::run_server_regression_tests();
   }
   if (all || group == "tls") {
     unit_tests::run_tls_and_auth_tests();

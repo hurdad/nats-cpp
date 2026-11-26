@@ -12,8 +12,7 @@ namespace natscpp {
  */
 class nats_error : public std::runtime_error {
  public:
-  nats_error(natsStatus status, std::string message)
-      : std::runtime_error(std::move(message)), status_(status) {}
+  nats_error(natsStatus status, const std::string& message) : std::runtime_error(message), status_(status) {}
 
   [[nodiscard]] natsStatus status() const noexcept { return status_; }
 
@@ -36,13 +35,16 @@ inline void throw_on_error(natsStatus status, const char* context) {
     message += text;
   }
 
-  const char* last = nats_GetLastError(nullptr);
-  if (last != nullptr && *last != '\0') {
+  // nats.c keeps the last error per thread and most calls do not clear it, so only append it when it is for
+  // this same status; otherwise it may describe an earlier, unrelated failure.
+  natsStatus last_status = NATS_OK;
+  const char* last = nats_GetLastError(&last_status);
+  if (last != nullptr && *last != '\0' && last_status == status) {
     message += " | ";
     message += last;
   }
 
-  throw nats_error(status, std::move(message));
+  throw nats_error(status, message);
 }
 
 }  // namespace natscpp

@@ -3,12 +3,12 @@
 #include <nats/nats.h>
 
 #include <chrono>
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -18,8 +18,68 @@
 
 namespace natscpp {
 
+class subscription;
+
+namespace detail {
+
+/**
+ * @brief State shared between an async subscription and nats.c.
+ *
+ * nats.c keeps calling the message handler on its delivery thread until the subscription is closed, and only
+ * reports that the handler will never run again through the on-complete callback. So nats.c holds its own
+ * reference to this state (a heap-allocated shared_ptr passed as the on-complete closure) and drops it from
+ * that callback. Destroying or unsubscribing the natscpp::subscription — even from inside the handler — never
+ * frees a handler that is still running.
+ */
+struct async_sub_state {
+  std::function<void(message)> handler;
+  std::mutex mu;
+  std::function<void()> on_complete;  // user callback, guarded by mu
+  bool completed = false;             // guarded by mu
+
+  // natsConnection_SubscribeTimeout delivers a null msg on timeout expiry; that is ignored.
+  // nats.c passes ownership of msg to the callback; message{} destroys it when the handler is done.
+  static void on_message(natsConnection*, natsSubscription*, natsMsg* msg, void* closure) {
+    if (msg == nullptr) return;
+    auto* state = static_cast<async_sub_state*>(closure);
+    try {
+      state->handler(message{msg});
+    } catch (...) {
+      std::fprintf(stderr, "[natscpp] exception in message callback, ignoring\n");
+    }
+  }
+
+  static void on_nats_complete(void* closure) {
+    auto* owner = static_cast<std::shared_ptr<async_sub_state>*>(closure);
+    std::function<void()> cb;
+    {
+      std::lock_guard<std::mutex> lock((*owner)->mu);
+      (*owner)->completed = true;
+      cb = std::move((*owner)->on_complete);
+    }
+    if (cb) {
+      try {
+        cb();
+      } catch (...) {
+        std::fprintf(stderr, "[natscpp] exception in on-complete callback, ignoring\n");
+      }
+    }
+    delete owner;  // nats.c's reference; the handler has returned for the last time
+  }
+};
+
+// do_subscribe(natsSubscription**, natsMsgHandler, void* closure) -> natsStatus
+template <typename SubscribeFn>
+subscription make_async_subscription(std::function<void(message)> handler, const char* context_name,
+                                     const SubscribeFn& do_subscribe);
+
+}  // namespace detail
+
 /**
  * @brief RAII wrapper for natsSubscription.
+ *
+ * For async subscriptions the handler stays alive until nats.c reports the subscription complete, so it is safe
+ * to destroy or unsubscribe the subscription from any thread, including from inside its own handler.
  */
 class subscription {
  public:
@@ -63,9 +123,7 @@ class subscription {
   }
 
   subscription(subscription&& other) noexcept
-      : sub_(std::move(other.sub_)),
-        on_release_(std::move(other.on_release_)),
-        completion_callbacks_(std::move(other.completion_callbacks_)) {}
+      : sub_(std::move(other.sub_)), on_release_(std::move(other.on_release_)), async_(std::move(other.async_)) {}
 
   subscription& operator=(subscription&& other) noexcept {
     if (this == &other) {
@@ -76,7 +134,7 @@ class subscription {
     release_callback();
     sub_ = std::move(other.sub_);
     on_release_ = std::move(other.on_release_);
-    completion_callbacks_ = std::move(other.completion_callbacks_);
+    async_ = std::move(other.async_);
     return *this;
   }
 
@@ -205,40 +263,23 @@ class subscription {
     return sub_ != nullptr ? natsSubscription_DrainCompletionStatus(sub_.get()) : NATS_OK;
   }
 
+  /**
+   * @brief Sets the callback invoked once the subscription is closed and its handler has returned for the last
+   *        time (after unsubscribe, drain, auto-unsubscribe or connection close). Replaces any earlier callback.
+   *
+   * Only async (callback) subscriptions created by natscpp support this; others throw NATS_INVALID_SUBSCRIPTION,
+   * as does a subscription that has already completed.
+   */
   void set_on_complete_callback(std::function<void()> cb) {
     check_valid();
-    auto token = std::make_shared<std::function<void()>>(std::move(cb));
-    {
-      std::lock_guard<std::mutex> lock(completion_callbacks_mutex_);
-      completion_callbacks_[token.get()] = token;
+    if (!async_) {
+      throw nats_error(NATS_INVALID_SUBSCRIPTION, "set_on_complete_callback: not an async natscpp subscription");
     }
-
-    natsStatus status = natsSubscription_SetOnCompleteCB(
-        sub_.get(),
-        [](void* closure) {
-          auto* fn = static_cast<std::function<void()>*>(closure);
-          try {
-            (*fn)();
-          } catch (...) {
-          }
-        },
-        token.get());
-
-    if (status != NATS_OK) {
-      std::lock_guard<std::mutex> lock(completion_callbacks_mutex_);
-      completion_callbacks_.erase(token.get());
-      throw_on_error(status, "natsSubscription_SetOnCompleteCB");
-    } else {
-      // nats.c only stores one on-complete callback; prune any previously registered tokens.
-      std::lock_guard<std::mutex> lock(completion_callbacks_mutex_);
-      for (auto it = completion_callbacks_.begin(); it != completion_callbacks_.end();) {
-        if (it->first != token.get()) {
-          it = completion_callbacks_.erase(it);
-        } else {
-          ++it;
-        }
-      }
+    std::lock_guard<std::mutex> lock(async_->mu);
+    if (async_->completed) {
+      throw nats_error(NATS_INVALID_SUBSCRIPTION, "set_on_complete_callback: subscription already completed");
     }
+    async_->on_complete = std::move(cb);
   }
 
   [[nodiscard]] std::vector<message> fetch(int batch, std::chrono::milliseconds timeout) {
@@ -294,7 +335,9 @@ class subscription {
       return std::nullopt;
     }
     throw_on_error(s, "natsSubscription_GetSequenceMismatch");
-    return consumer_sequence_mismatch{mismatch.Stream, mismatch.ConsumerClient, mismatch.ConsumerServer};
+    return consumer_sequence_mismatch{.stream_seq = mismatch.Stream,
+                                      .consumer_client_seq = mismatch.ConsumerClient,
+                                      .consumer_server_seq = mismatch.ConsumerServer};
   }
 
 
@@ -305,6 +348,9 @@ class subscription {
     }
   }
 
+  template <typename SubscribeFn>
+  friend subscription detail::make_async_subscription(std::function<void(message)>, const char*, const SubscribeFn&);
+
   void release_callback() noexcept {
     if (on_release_) {
       on_release_();
@@ -314,8 +360,35 @@ class subscription {
 
   std::unique_ptr<natsSubscription, detail::subscription_deleter> sub_;
   std::function<void()> on_release_;
-  std::unordered_map<void*, std::shared_ptr<std::function<void()>>> completion_callbacks_;
-  std::mutex completion_callbacks_mutex_;
+  std::shared_ptr<detail::async_sub_state> async_;  // async subscriptions only
 };
+
+namespace detail {
+
+template <typename SubscribeFn>
+subscription make_async_subscription(std::function<void(message)> handler, const char* context_name,
+                                     const SubscribeFn& do_subscribe) {
+  auto state = std::make_shared<async_sub_state>();
+  state->handler = std::move(handler);
+
+  natsSubscription* raw{};
+  throw_on_error(do_subscribe(&raw, &async_sub_state::on_message, state.get()), context_name);
+
+  auto* nats_ref = new std::shared_ptr<async_sub_state>(state);
+  const natsStatus status = natsSubscription_SetOnCompleteCB(raw, &async_sub_state::on_nats_complete, nats_ref);
+  if (status != NATS_OK) {
+    // The subscription closed before the callback could be set (e.g. its connection closed concurrently).
+    // nats.c may still be running the handler and will never say when it stops, so nats_ref is deliberately
+    // leaked rather than freed under a running handler.
+    natsSubscription_Destroy(raw);
+    throw_on_error(status, "natsSubscription_SetOnCompleteCB");
+  }
+
+  subscription out{raw};
+  out.async_ = std::move(state);
+  return out;
+}
+
+}  // namespace detail
 
 }  // namespace natscpp

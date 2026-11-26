@@ -215,7 +215,8 @@ void test_subscription_move_assign_under_traffic() {
 
   const std::string subj = unique("natscpp.moveassign.");
   std::atomic<bool> stop{false};
-  std::atomic<int> received{0};
+  // Shared, not a local reference: handlers of the replaced subscriptions may still run after this returns.
+  auto received = std::make_shared<std::atomic<int>>(0);
   std::thread publisher([&] {
     auto pub = natscpp::connection::connect_to("nats://127.0.0.1:4222");
     while (!stop) {
@@ -225,19 +226,24 @@ void test_subscription_move_assign_under_traffic() {
     pub.flush(2s);
   });
 
-  auto make_handler = [&received] {
+  auto make_handler = [received] {
     auto state = std::make_shared<std::vector<int>>(64, 1);  // heap state the handler touches
-    return [&received, state](natscpp::message) { received += (*state)[0]; };
+    return [received, state](natscpp::message) { *received += (*state)[0]; };
   };
   natscpp::subscription sub = nc->subscribe_async(subj, make_handler());
   for (int i = 0; i < 200; ++i) {
     sub = nc->subscribe_async(subj, make_handler());
   }
-  std::this_thread::sleep_for(100ms);
+  // Wait for traffic on the final subscription rather than a fixed time (slow under sanitizers).
+  const int before = received->load();
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (received->load() == before && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(1ms);
+  }
   stop = true;
   publisher.join();
   sub.unsubscribe();
-  assert(received > 0);
+  assert(received->load() > before);
 }
 
 // Regression: a moved-from or destroyed connection used to free handlers of subscriptions still alive.

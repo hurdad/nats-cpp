@@ -23,9 +23,11 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
   - [JetStream](#jetstream)
   - [KeyValue](#keyvalue)
   - [Trace propagation](#trace-propagation)
+  - [Coroutines](#coroutines)
   - [Library utilities](#library-utilities)
+- [Threading and callback lifetimes](#threading-and-callback-lifetimes)
 - [Includes](#includes)
-- [Notes](#notes)
+- [Development](#development)
 
 ## Features
 
@@ -38,14 +40,16 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
   - request/reply (sync + async)
   - explicit subscribe APIs for both sync and async callback styles
 - Optional coroutine support (`co_await`) through future awaitables.
-- JetStream wrappers (context, stream/consumer management, push/pull subscriptions).
+- JetStream wrappers (context, stream/consumer management, push/pull subscriptions, callback push
+  subscriptions, batch fetch).
 - Stream + consumer-group creation helpers (`create_stream`, `create_consumer_group`).
 - KeyValue wrappers (open bucket, put/get/delete entries, watch key updates).
 - Trace propagation helpers using NATS headers (`TraceCarrier` concept).
 
 ## Requirements
 
-- C++20 compiler
+- C++20 or C++23 compiler. CI builds with GCC and Clang in both modes; the library only needs C++20, and a
+  project compiling as C++23 can use it unchanged.
 - CMake 3.20+
 - `nats.c` dependency, resolved in one of two ways:
   - bundled submodule at `third_party/nats.c` (static build wired automatically by CMake), or
@@ -56,10 +60,33 @@ Modern, header-only **C++20** wrappers for the official [`nats.c`](https://githu
 ## Build and test
 
 ```bash
-cmake -S . -B build -DBUILD_TESTING=ON
+cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+The `unit` test group needs no server. The `integration` and `tls` groups need nats-servers, and **skip
+silently** when none is reachable. To run everything, start the same servers CI uses (needs `nats-server` and
+`openssl`; set `NATS_SERVER` to use another binary):
+
+```bash
+eval "$(tests/ci/start-servers.sh /tmp/natscpp-servers | sed 's/^/export /')"
+NATSCPP_REQUIRE_SERVER=1 ctest --test-dir build --output-on-failure   # a skip is now a failure
+tests/ci/run-examples.sh build                                         # every example, checked
+tests/ci/stop-servers.sh /tmp/natscpp-servers
+```
+
+Build options:
+
+| Option | Default | Effect |
+|---|---|---|
+| `NATSCPP_NATS_BACKEND` | `auto` | nats.c source: `auto`, `system` or `bundled` (below) |
+| `NATSCPP_BUNDLED_WITH_TLS` | ON if OpenSSL is found | Build the bundled nats.c with TLS |
+| `NATSCPP_BUILD_TESTS` | ON when top-level | Build the test suite |
+| `NATSCPP_BUILD_EXAMPLES` | ON when top-level | Build the examples |
+| `NATSCPP_WARNINGS_AS_ERRORS` | OFF | `-Werror` / `/WX` for natscpp's tests and examples (CI turns it on) |
+
+Use `-DCMAKE_CXX_STANDARD=23` to build the tests and examples as C++23.
 
 `NATSCPP_NATS_BACKEND` picks the nats.c source: `auto` (default) uses a system `cnats` package if one is found and
 otherwise falls back to the bundled submodule, `system` requires the system package, and `bundled` always uses the
@@ -104,22 +131,36 @@ add_subdirectory(path/to/natscpp)
 target_link_libraries(app PRIVATE natscpp::natscpp)
 ```
 
+As a subdirectory, natscpp builds neither its tests nor its examples (turn them on with
+`NATSCPP_BUILD_TESTS` / `NATSCPP_BUILD_EXAMPLES`), and it leaves the parent's cache alone.
+
+`natscpp::natscpp` brings in everything needed to link: nats.c, OpenSSL when nats.c uses it, and threads.
+With the bundled backend, `cmake --install` also installs the static nats.c library, its headers (`nats.h`,
+`nats/`) and its `cnats` CMake package into the same prefix, because the installed natscpp package depends on
+them. Install into a prefix of its own if another nats.c is already installed there.
+
 ## Example programs
 
-When `NATSCPP_BUILD_EXAMPLES=ON` (default), the following example targets are built:
+Each `examples/<name>.cpp` builds a `natscpp_<name>` target. They connect to `$NATS_URL` (default
+`nats://127.0.0.1:4222`; JetStream and KV need a server started with `-js`), check their own results, exit
+non-zero with a readable message on failure, and clean up any streams or buckets they create.
 
-- `natscpp_sync_example`
-- `natscpp_async_example`
-- `natscpp_request_reply_example`
-- `natscpp_request_reply_server_example`
-- `natscpp_request_reply_client_example`
-- `natscpp_jetstream_sync_pull_example`
-- `natscpp_jetstream_sync_push_example`
-- `natscpp_jetstream_async_pull_example`
-- `natscpp_jetstream_async_push_example`
-- `natscpp_kv_example`
-
-> Most examples expect a local NATS server at `nats://127.0.0.1:4222`.
+| Example | Shows |
+|---|---|
+| `sync_example` | Blocking publish/subscribe and request/reply |
+| `async_example` | Callback subscriptions and `request_async` |
+| `request_reply_example` | Request/reply in one process |
+| `request_reply_server_example` / `request_reply_client_example` | A two-process service with a queue group, graceful shutdown on Ctrl-C, and handling no responders |
+| `queue_group_example` | Load balancing across a queue group, and `drain()` |
+| `headers_trace_example` | Message headers and trace-context propagation |
+| `lifecycle_example` | Reconnect settings, connection callbacks, statistics, and draining a connection |
+| `secure_connection_example` | TLS and authentication, configured from environment variables |
+| `coroutine_example` | `co_await` on `request_awaitable` |
+| `jetstream_sync_pull_example` | Pull consumer: batch `fetch()` and acks |
+| `jetstream_async_pull_example` | Pull consumer driven from a worker thread |
+| `jetstream_sync_push_example` | Push consumer with `next()`, and message metadata |
+| `jetstream_async_push_example` | Callback push consumer (`jetstream::subscribe_async`) with manual acks |
+| `kv_example` | KeyValue: put/get, compare-and-set, history, keys, and watchers |
 
 ## API examples
 
@@ -130,14 +171,13 @@ When `NATSCPP_BUILD_EXAMPLES=ON` (default), the following example targets are bu
 #include <natscpp/connection.hpp>
 
 int main() {
-  natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
+  natscpp::connection nc({.url = "nats://127.0.0.1:4222"});  // throws natscpp::nats_error if unreachable
 
-  auto sub = nc.subscribe_sync("demo.sync.events");
+  auto sub = nc.subscribe_sync("demo.sync.events");  // subscribe before publishing, or the message is missed
   nc.publish("demo.sync.events", "hello");
 
-  auto msg = sub.next_message(std::chrono::seconds(1));
-  auto reply = nc.request_sync("svc.echo", "ping");
-  return (msg.data() == "hello" && reply.data() == "ping") ? 0 : 1;
+  auto msg = sub.next_message(std::chrono::seconds(1));  // throws NATS_TIMEOUT if nothing arrives
+  return msg.data() == "hello" ? 0 : 1;
 }
 ```
 
@@ -150,17 +190,14 @@ int main() {
 int main() {
   natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
 
-  auto sub = nc.subscribe_async("demo.async.events", [](natscpp::message msg) {
-    // callback invoked by nats.c dispatcher thread
-    (void)msg;
+  // An echo responder: the handler runs on a nats.c delivery thread.
+  auto echo = nc.subscribe_async("demo.echo", [&nc](natscpp::message req) {
+    if (!req.reply_to().empty()) nc.publish(req.reply_to(), req.data());
   });
 
-  nc.publish("demo.async.events", "hello async");
-  auto fut = nc.request_async("svc.echo", "ping async", std::chrono::seconds(2));
-  auto async_reply = fut.get();
-  sub.unsubscribe();
-
-  return async_reply.data().empty() ? 1 : 0;
+  auto fut = nc.request_async("demo.echo", "ping async", std::chrono::seconds(2));
+  auto reply = fut.get();  // rethrows the request's nats_error, e.g. NATS_NO_RESPONDERS or NATS_TIMEOUT
+  return reply.data() == "ping async" ? 0 : 1;
 }
 ```
 
@@ -189,7 +226,7 @@ Request/reply example is available in:
 |---|---|
 | `token` / `set_token()` | Static token |
 | `user`, `password` / `set_user_info()` | Username + password |
-| `user_credentials_file` / `set_user_credentials_from_files()` | NKey/JWT credentials file |
+| `user_credentials_file` / `set_user_credentials_from_files(creds, seed = "")` | JWT credentials: a chained `.creds` file, or a JWT file plus a separate seed file |
 | `nkey_public` + `nkey_signature_cb` / `set_nkey()` | NKey public key + signature callback |
 | `token_handler_cb` / `set_token_handler()` | Dynamic token callback (invoked on each connect/reconnect) |
 
@@ -200,7 +237,7 @@ Request/reply example is available in:
 | `secure` / `set_secure(true)` | Require TLS |
 | `ca_trusted_certificates_file` / `load_ca_trusted_certificates()` | CA certificate file |
 | `certificates_chain_file` + `private_key_file` / `load_certificates_chain()` | Client cert + key |
-| `skip_server_verification` / `set_skip_server_verification()` | Disable hostname check |
+| `skip_server_verification` / `set_skip_server_verification()` | Turn off **all** server certificate verification (testing only) |
 | `expected_hostname` / `set_expected_hostname()` | TLS SNI override |
 | `ssl_verification_callback` / `set_ssl_verification_callback()` | Custom OpenSSL verify callback (nats.c ≥ 3.10, EXPERIMENTAL there) |
 
@@ -249,7 +286,7 @@ opts.set_ssl_verification_callback(&pin_issuer);
 
 | Field / setter | Description |
 |---|---|
-| `closed_cb` / `set_closed_cb()` | Called when connection is permanently closed |
+| `closed_cb` / `set_closed_cb()` | Called when connection is permanently closed (may run after the `connection` object is destroyed) |
 | `disconnected_cb` / `set_disconnected_cb()` | Called on disconnect |
 | `reconnected_cb` / `set_reconnected_cb()` | Called after successful reconnect |
 | `error_handler` / `set_error_handler()` | Async error handler `(conn, sub, status)` |
@@ -273,6 +310,7 @@ opts.set_ssl_verification_callback(&pin_issuer);
 
 | Method | Description |
 |---|---|
+| `connected()` | Whether the connection is currently up (false while connecting, reconnecting, draining or closed) |
 | `status()` | Raw `natsConnStatus` enum |
 | `connected_url()` | URL of currently connected server |
 | `connected_server_id()` | Server ID string |
@@ -282,7 +320,7 @@ opts.set_ssl_verification_callback(&pin_issuer);
 | `get_statistics()` | `statistics` struct: in/out message and byte counts, reconnect count |
 | `client_id()`, `client_ip()` | Client identity on the server |
 | `local_ip_and_port()` | Local socket binding |
-| `new_inbox()` | Generate a unique reply-to inbox subject |
+| `new_inbox()` | Generate a unique reply-to inbox subject (static) |
 | `buffered_bytes()` | Bytes pending in outgoing buffer |
 | `is_reconnecting()`, `is_draining()` | Connection state predicates |
 
@@ -301,7 +339,9 @@ msg.add_header("key", "value2");  // multi-value
 msg.delete_header("key");
 ```
 
-`msg.is_no_responders()` returns `true` when a request received a no-responders status response.
+`msg.is_no_responders()` returns `true` for the status message the server sends when a request has no
+responders. Only an async handler receives that message: `request_sync` / `request_async` throw
+`NATS_NO_RESPONDERS` instead, and so does `next_message()` on a sync subscription.
 
 **JetStream acknowledgments** (only valid on JetStream-delivered messages):
 
@@ -334,7 +374,8 @@ msg.set_header("Content-Type", "application/json");
 
 ### Headers
 
-The `natscpp::header` class wraps a `natsHeader*` for building standalone header objects (e.g., when publishing with `publish_request` or constructing messages manually).
+The `natscpp::header` class wraps a standalone `natsHeader*`, for nats.c APIs that take one (through
+`native_handle()`). To put headers on a message you publish, use `message::set_header` / `add_header` above.
 
 ```cpp
 #include <natscpp/header.hpp>
@@ -363,20 +404,22 @@ sub.drain();                                     // async; start draining
 sub.drain(std::chrono::milliseconds(500));        // with timeout
 sub.wait_for_drain_completion(std::chrono::seconds(2));
 natsStatus s = sub.drain_completion_status();
-sub.set_on_complete_callback([]{ /* done */ });
 ```
 
-**JetStream batch fetch** (pull consumers):
+**Completion callback** (async subscriptions): runs once the subscription is closed — by `unsubscribe()`,
+drain, auto-unsubscribe or connection close — and its handler has returned for the last time. Use it to know
+when state the handler uses can be freed. A second call replaces the first; sync subscriptions, and
+subscriptions that already completed, throw `NATS_INVALID_SUBSCRIPTION`.
 
 ```cpp
-// Fetch up to 10 messages, waiting up to 1 second
-std::vector<natscpp::message> msgs =
-    sub.fetch(10, std::chrono::seconds(1));
-for (auto& m : msgs) {
-  // process, then ack
-  m.ack();
-}
+std::promise<void> done;
+sub.set_on_complete_callback([&done] { done.set_value(); });
+sub.unsubscribe();
+done.get_future().wait();  // the handler will not run again
 ```
+
+`fetch()` / `fetch_request()` here work on a pull subscription you created with nats.c directly; with
+natscpp's own JetStream API use `js_pull_consumer::fetch()` (below).
 
 **Subscription statistics:**
 
@@ -401,21 +444,33 @@ uint64_t queued   = sub.queued_messages();
 ```cpp
 #include <natscpp/jetstream.hpp>
 
-natscpp::connection nc;
+natscpp::connection nc({.url = "nats://127.0.0.1:4222"});  // a default-constructed connection is not connected
 natscpp::jetstream js(nc);
 
-js.create_stream({.name = "ORDERS", .subjects = {"orders.>"}});
-js.create_consumer_group({
+(void)js.create_stream({.name = "ORDERS", .subjects = {"orders.>"}});
+(void)js.create_consumer_group({
   .stream = "ORDERS",
   .durable_name = "orders-worker",
   .filter_subject = "orders.created",
   .type = natscpp::js_consumer_type::pull,
 });
 
-js.publish("orders.created", R"({"id":"A-1"})");
+(void)js.publish("orders.created", R"({"id":"A-1"})");
 auto pull = js.pull_subscribe("orders.created", "orders-worker");
-auto msg = pull.next(std::chrono::seconds(1));
+for (auto& msg : pull.fetch(10, std::chrono::seconds(1))) {  // one pull request for up to 10 messages
+  // ... process ...
+  msg.ack();  // the default ack policy is explicit: unacked messages are redelivered after the ack wait
+}
+auto one = pull.next(std::chrono::seconds(1));  // a single message (one round trip each)
 ```
+
+`fetch()` and `next()` throw `NATS_TIMEOUT` when no message arrives in time.
+
+**Push consumers:** `push_subscribe(subject, durable)` returns a `js_push_consumer` read with `next()`.
+`subscribe_async(subject, durable, handler, manual_ack = false)` delivers to a callback instead and returns a
+`natscpp::subscription` (same lifetime rules as core async subscriptions). Without `manual_ack`, nats.c acks
+each message after the handler returns; with it, the handler calls `ack()` / `nak()` / `term()`. An empty
+durable name creates an ephemeral consumer.
 
 ### Policy enums
 
@@ -435,6 +490,7 @@ auto msg = pull.next(std::chrono::seconds(1));
 |---|---|---|
 | `name` | — | Stream name (required) |
 | `subjects` | — | Subject filters |
+| `description` | — | Optional description |
 | `storage` | `file` | Storage backend |
 | `retention` | `limits` | Retention policy |
 | `discard` | `old` | Message discard policy when limits hit |
@@ -472,6 +528,11 @@ auto msg = pull.next(std::chrono::seconds(1));
 | `headers_only` | `false` | Deliver headers only, no body |
 | `opt_start_seq` | `0` | Start sequence for `by_start_seq` |
 | `opt_start_time_ns` | `0` | Start time (UTC ns) for `by_start_time` |
+| `inactive_threshold_ns` | `0` | Delete an inactive consumer after this long (0 = server default) |
+| `replicas` | `0` | Consumer replicas (0 = inherit from the stream) |
+| `description` | — | Optional description |
+
+`filter_subject` and `filter_subjects` are alternatives: setting both throws `std::invalid_argument`.
 
 ### Publish with options
 
@@ -481,28 +542,35 @@ opts.msg_id = "dedup-key-1";           // deduplication ID
 opts.expected_last_seq = 42;           // optimistic concurrency
 opts.msg_ttl_ms = 5000;               // message TTL (nats-server 2.11+)
 
-natscpp::js_pub_ack ack = js.publish("orders.created", R"({})", &opts);
+natscpp::js_pub_ack ack = js.publish("orders.created", R"({})", opts);
+// publish_msg(message, opts) publishes a message with headers, with the same options.
 // ack.stream, ack.sequence, ack.domain, ack.duplicate
 ```
 
 ### Stream and consumer management
 
+`update_stream` and `update_consumer_group` send a complete configuration, not a patch: fields you leave out
+go back to their defaults (an update without `subjects` would try to clear the stream's subjects). Start
+from the full configuration you created the stream or consumer with and change what you need.
+
 ```cpp
 // Streams
-js.update_stream({.name = "ORDERS", .max_msgs = 1000000});
+natscpp::js_stream_config orders{.name = "ORDERS", .subjects = {"orders.>"}};
+orders.max_msgs = 1000000;
+(void)js.update_stream(orders);
 js.purge_stream("ORDERS");
 natscpp::stream_info si = js.get_stream_info("ORDERS");
 std::vector<natscpp::stream_info>  streams = js.list_streams();
 std::vector<std::string>           names   = js.list_stream_names();
 
 // Direct message access
-natscpp::message m   = js.get_msg("ORDERS", 42);
-natscpp::message m   = js.get_last_msg("ORDERS", "orders.created");
+natscpp::message by_seq  = js.get_msg("ORDERS", 42);
+natscpp::message last    = js.get_last_msg("ORDERS", "orders.created");
 js.delete_msg("ORDERS", 42);
 js.erase_msg("ORDERS", 42);   // overwrite payload before deletion
 
 // Consumers
-js.update_consumer_group({.stream = "ORDERS", .durable_name = "worker", .max_deliver = 5});
+(void)js.update_consumer_group({.stream = "ORDERS", .durable_name = "worker", .max_deliver = 5});
 natscpp::consumer_info ci = js.get_consumer_group("ORDERS", "worker");
 js.delete_consumer_group("ORDERS", "worker");
 std::vector<natscpp::consumer_info>  consumers = js.list_consumer_groups("ORDERS");
@@ -526,7 +594,7 @@ JetStream examples are available in:
 #include <natscpp/kv.hpp>
 
 natscpp::connection nc({.url = "nats://127.0.0.1:4222"});
-auto kv = natscpp::key_value::create(nc, "profiles");
+auto kv = natscpp::key_value::create(nc, "profiles");  // or create(nc, kv_config{.bucket = ..., .history = 5})
 
 auto rev = kv.put("user-1", R"({"name":"Ada"})");
 auto entry = kv.get("user-1");
@@ -548,7 +616,10 @@ Watch APIs:
 - `watch_multi(keys, opts)` for multiple keys/filters
 - `watch_all(opts)` for all keys in the bucket
 
-`kv_watcher::next()` takes a timeout in milliseconds. It may return an invalid `kv_entry` (`entry.valid() == false`) when the initial snapshot is complete.
+`kv_watcher::next()` takes a timeout in milliseconds and throws `NATS_TIMEOUT` when it expires; without an
+argument it blocks until an entry arrives or the watcher is stopped. Unless `updates_only` is set, a watcher
+first delivers the current value of every matching key, then **one invalid entry** (`entry.valid() == false`)
+marking the end of that snapshot, then live updates — so check `valid()` before using an entry.
 
 Additional CRUD and utility methods on `key_value`:
 
@@ -578,9 +649,7 @@ KeyValue example is available in:
 
 #include <natscpp/trace.hpp>
 
-natsMsg* raw{};
-natsMsg_Create(&raw, "trace.subject", nullptr, "payload", 7);
-natscpp::message msg(raw);
+auto msg = natscpp::message::create("trace.subject", /*reply_to=*/"", "payload");
 
 natscpp::message_trace_carrier carrier(msg);
 std::vector<std::pair<std::string, std::string>> injected = {
@@ -592,6 +661,18 @@ std::unordered_map<std::string, std::string> extracted;
 std::vector<std::string> keys = {"traceparent", "tracestate"};
 natscpp::extract_trace_context(carrier, keys, extracted);
 ```
+
+### Coroutines
+
+`request_awaitable(subject, payload, timeout)` returns an awaitable for `co_await` in your own coroutine type
+(natscpp does not ship one; see `examples/coroutine_example.cpp` for a minimal task):
+
+```cpp
+natscpp::message reply = co_await nc.request_awaitable("svc.echo", "ping");  // throws like request_sync
+```
+
+The coroutine resumes on a background thread (one per suspension), so this suits occasional requests, not
+high-rate traffic. The awaitable is move-only.
 
 ### Library utilities
 
@@ -606,9 +687,8 @@ bool ok = natscpp::nats_CheckCompatibility();
 // Initialize the library (optional — nats.c does this lazily on first connect).
 natscpp::nats_Open(-1);
 
-// Clean up all library resources.
-natscpp::nats_Close();
-natscpp::nats_CloseAndWait(std::chrono::seconds(5));
+// Clean up all library resources at exit (call one of these, once, after every natscpp object is gone).
+natscpp::nats_CloseAndWait(std::chrono::seconds(5));  // waits for nats.c's threads; or nats_Close() to not wait
 
 // Version information.
 const char* ver = natscpp::nats_GetVersion();
@@ -630,20 +710,57 @@ int64_t now_ms = natscpp::nats_Now();
 int64_t now_ns = natscpp::nats_NowInNanoSeconds();
 ```
 
+## Threading and callback lifetimes
+
+- Message handlers and connection callbacks run on nats.c's threads, not yours. Synchronize any state they
+  share with your code.
+- An async subscription keeps its handler alive until nats.c reports it complete. Destroying, move-assigning
+  or unsubscribing a `subscription` — from any thread, including from inside its own handler — never frees a
+  handler that is running. The handler may still run briefly after `unsubscribe()` returns, so state it uses
+  through references must outlive it: wait for the completion callback (above) or share the state with a
+  `shared_ptr`.
+- Connection callbacks are owned by the connection inside nats.c and released after `closed_cb`, which can
+  run after the `natscpp::connection` object is destroyed. Capture what they need by value or by `shared_ptr`.
+- Exceptions thrown by a handler or callback are caught and reported on stderr; they never unwind into nats.c.
+- `request_async` runs each request on its own thread (`std::async`).
+
 ## Includes
 
-- `#include <natscpp/natscpp.hpp>` (umbrella — includes all headers below **except** `awaitable.hpp`)
+- `#include <natscpp/natscpp.hpp>` (umbrella — includes all headers below)
 - `#include <natscpp/connection.hpp>`
 - `#include <natscpp/message.hpp>`
 - `#include <natscpp/subscription.hpp>`
 - `#include <natscpp/header.hpp>`
-- `#include <natscpp/awaitable.hpp>` (required for `co_await` / `request_awaitable`; not in umbrella)
+- `#include <natscpp/awaitable.hpp>` (`future_awaitable`; already included by `connection.hpp`)
 - `#include <natscpp/jetstream.hpp>`
 - `#include <natscpp/kv.hpp>`
 - `#include <natscpp/trace.hpp>`
 - `#include <natscpp/error.hpp>`
 - `#include <natscpp/library.hpp>`
 
-## Notes
+## Development
 
-This project is intentionally header-only. Link your application against `nats` as required by your environment.
+This project is intentionally header-only; the CMake target carries the nats.c link dependency.
+
+CI (`.github/workflows/ci.yml`) runs on every push and pull request:
+
+- the full test suite and every example against real nats-servers, under **ASan + UBSan** and **TSan**
+  (suppressions for nats.c and OpenSSL internals live in `tests/ci/*.supp`, each with its reason);
+- Release builds with GCC as **C++20 and C++23**, a Clang C++23 build, and a build without TLS — all with
+  warnings as errors;
+- **coverage** of `include/natscpp` (line and branch, with minimum thresholds) and every job's **test
+  results** (JUnit), both uploaded to Codecov;
+- **lint**: `clang-format` (`.clang-format`), `clang-tidy` (`.clang-tidy`, with the reason for each disabled
+  check), `shellcheck` and `actionlint`;
+- an **install** check: `find_package(natscpp)` from an installed prefix, and `add_subdirectory` without
+  pulling natscpp's tests or examples into the parent build.
+
+Locally:
+
+```bash
+clang-format -i $(git ls-files '*.hpp' '*.cpp' ':!:third_party')     # format
+cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && run-clang-tidy -p build tests/ examples/
+cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+```

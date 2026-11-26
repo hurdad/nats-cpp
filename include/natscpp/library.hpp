@@ -8,13 +8,12 @@
 #include <string>
 #include <string_view>
 
-#ifdef nats_CheckCompatibility
-#undef nats_CheckCompatibility
-#endif
-
 namespace natscpp {
 
-inline bool nats_CheckCompatibility() {
+// nats.h defines nats_CheckCompatibility() as a function-like macro. The parentheses keep it from expanding here
+// without #undef-ing it for everyone; a call natscpp::nats_CheckCompatibility() still expands to
+// natscpp::nats_CheckCompatibilityImpl(...) below, which does the same check.
+inline bool (nats_CheckCompatibility)() {
   return ::nats_CheckCompatibilityImpl(NATS_VERSION_REQUIRED_NUMBER, NATS_VERSION_NUMBER, NATS_VERSION_STRING);
 }
 
@@ -54,6 +53,7 @@ inline void nats_ReleaseThreadMemory() { ::nats_ReleaseThreadMemory(); }
 
 inline natsStatus nats_SetMessageDeliveryPoolSize(int max) { return ::nats_SetMessageDeliveryPoolSize(max); }
 
+// nats.c takes input as a C string, so it ends at the first NUL byte.
 inline natsStatus nats_Sign(std::string_view encoded_seed, std::string_view input, unsigned char** signature,
                             int* signature_length) {
   return ::nats_Sign(std::string(encoded_seed).c_str(), std::string(input).c_str(), signature, signature_length);

@@ -2,9 +2,13 @@
 
 #include <nats/nats.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -13,6 +17,7 @@
 #include <natscpp/connection.hpp>
 #include <natscpp/error.hpp>
 #include <natscpp/message.hpp>
+#include <natscpp/subscription.hpp>
 
 namespace natscpp {
 
@@ -206,19 +211,38 @@ class js_pull_consumer {
   }
 
   [[nodiscard]] bool valid() const noexcept { return sub_ != nullptr; }
+  [[nodiscard]] natsSubscription* native_handle() const noexcept { return sub_; }
 
-  [[nodiscard]] message next(std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
+  /**
+   * @brief Fetches up to batch messages in one pull request, waiting at most timeout for the first.
+   *
+   * Returns as soon as at least one message has arrived and no more are immediately available; throws
+   * NATS_TIMEOUT when none arrive in time.
+   */
+  [[nodiscard]] std::vector<message> fetch(int batch, std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
     if (sub_ == nullptr) throw nats_error(NATS_INVALID_ARG, "js_pull_consumer: not initialized");
+    if (batch < 1) throw std::invalid_argument("js_pull_consumer::fetch: batch must be at least 1");
     natsMsgList list{};
-    throw_on_error(natsSubscription_Fetch(&list, sub_, 1, static_cast<int64_t>(timeout.count()), nullptr),
+    throw_on_error(natsSubscription_Fetch(&list, sub_, batch, static_cast<int64_t>(timeout.count()), nullptr),
                    "natsSubscription_Fetch");
     struct list_guard { natsMsgList& l; ~list_guard() { natsMsgList_Destroy(&l); } } guard{list};
-    if (list.Count < 1 || list.Msgs == nullptr) {
+    std::vector<message> out;
+    out.reserve(static_cast<std::size_t>(list.Count));
+    for (int i = 0; i < list.Count; ++i) {
+      out.emplace_back(list.Msgs[i]);
+      list.Msgs[i] = nullptr;
+    }
+    if (out.empty()) {
       throw nats_error(NATS_TIMEOUT, "natsSubscription_Fetch returned no messages");
     }
-    natsMsg* msg = list.Msgs[0];
-    list.Msgs[0] = nullptr;
-    return message{msg};
+    return out;
+  }
+
+  /**
+   * @brief Fetches a single message (one pull request per call; use fetch() for throughput).
+   */
+  [[nodiscard]] message next(std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
+    return std::move(fetch(1, timeout).front());
   }
 
  private:
@@ -248,6 +272,7 @@ class js_push_consumer {
   }
 
   [[nodiscard]] bool valid() const noexcept { return sub_ != nullptr; }
+  [[nodiscard]] natsSubscription* native_handle() const noexcept { return sub_; }
 
   [[nodiscard]] message next(std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
     if (sub_ == nullptr) throw nats_error(NATS_INVALID_ARG, "js_push_consumer: not initialized");
@@ -303,17 +328,10 @@ class jetstream {
   [[nodiscard]] js_pub_ack publish(std::string_view subject, std::string_view payload,
                                    const js_publish_options& opts = {}) {
     check_valid();
+    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      throw std::invalid_argument("jetstream::publish: payload exceeds INT_MAX bytes");
     jsPubOptions pub_opts{};
-    bool has_opts = false;
-    if (!opts.msg_id.empty())                { pub_opts.MsgId = opts.msg_id.c_str(); has_opts = true; }
-    if (!opts.expected_stream.empty())       { pub_opts.ExpectStream = opts.expected_stream.c_str(); has_opts = true; }
-    if (!opts.expected_last_msg_id.empty())  { pub_opts.ExpectLastMsgId = opts.expected_last_msg_id.c_str(); has_opts = true; }
-    if (opts.expected_last_seq > 0)          { pub_opts.ExpectLastSeq = opts.expected_last_seq; has_opts = true; }
-    if (opts.expected_last_subject_seq > 0)  { pub_opts.ExpectLastSubjectSeq = opts.expected_last_subject_seq; has_opts = true; }
-    if (opts.expect_no_message)              { pub_opts.ExpectNoMessage = true; has_opts = true; }
-    if (opts.max_wait_ms > 0)                { pub_opts.MaxWait = opts.max_wait_ms; has_opts = true; }
-    if (opts.msg_ttl_ms > 0)                 { pub_opts.MsgTTL = opts.msg_ttl_ms; has_opts = true; }
-
+    const bool has_opts = to_native_pub_options(opts, pub_opts);
     jsPubAck* ack{};
     throw_on_error(js_Publish(&ack, ctx_, std::string(subject).c_str(), payload.data(),
                               static_cast<int>(payload.size()), has_opts ? &pub_opts : nullptr, nullptr),
@@ -327,16 +345,7 @@ class jetstream {
   [[nodiscard]] js_pub_ack publish_msg(message msg, const js_publish_options& opts = {}) {
     check_valid();
     jsPubOptions pub_opts{};
-    bool has_opts = false;
-    if (!opts.msg_id.empty())                { pub_opts.MsgId = opts.msg_id.c_str(); has_opts = true; }
-    if (!opts.expected_stream.empty())       { pub_opts.ExpectStream = opts.expected_stream.c_str(); has_opts = true; }
-    if (!opts.expected_last_msg_id.empty())  { pub_opts.ExpectLastMsgId = opts.expected_last_msg_id.c_str(); has_opts = true; }
-    if (opts.expected_last_seq > 0)          { pub_opts.ExpectLastSeq = opts.expected_last_seq; has_opts = true; }
-    if (opts.expected_last_subject_seq > 0)  { pub_opts.ExpectLastSubjectSeq = opts.expected_last_subject_seq; has_opts = true; }
-    if (opts.expect_no_message)              { pub_opts.ExpectNoMessage = true; has_opts = true; }
-    if (opts.max_wait_ms > 0)                { pub_opts.MaxWait = opts.max_wait_ms; has_opts = true; }
-    if (opts.msg_ttl_ms > 0)                 { pub_opts.MsgTTL = opts.msg_ttl_ms; has_opts = true; }
-
+    const bool has_opts = to_native_pub_options(opts, pub_opts);
     jsPubAck* ack{};
     natsMsg* raw = msg.release();
     natsStatus status = js_PublishMsg(&ack, ctx_, raw, has_opts ? &pub_opts : nullptr, nullptr);
@@ -362,6 +371,7 @@ class jetstream {
     check_valid();
     std::string durable_str(durable_name);
     jsSubOptions sub_opts{};
+    throw_on_error(jsSubOptions_Init(&sub_opts), "jsSubOptions_Init");
     if (!durable_str.empty()) {
       sub_opts.Config.Durable = durable_str.c_str();
     }
@@ -374,8 +384,31 @@ class jetstream {
   }
 
   [[nodiscard]] js_push_consumer subscribe(std::string_view stream_subject, std::string_view durable_name) {
-    check_valid();
     return push_subscribe(stream_subject, durable_name);
+  }
+
+  /**
+   * @brief Callback-based push subscription: handler runs on a nats.c delivery thread for each message.
+   *
+   * durable_name may be empty for an ephemeral consumer. Unless manual_ack is true, nats.c acknowledges each
+   * message after the handler returns; with manual_ack the handler must call ack()/nak()/term() itself.
+   * The returned subscription has the same lifetime guarantees as connection::subscribe_async.
+   */
+  [[nodiscard]] subscription subscribe_async(std::string_view stream_subject, std::string_view durable_name,
+                                             std::function<void(message)> handler, bool manual_ack = false) {
+    check_valid();
+    std::string subject_str(stream_subject);
+    std::string durable_str(durable_name);
+    return detail::make_async_subscription(
+        std::move(handler), "js_Subscribe",
+        [this, &subject_str, &durable_str, manual_ack](natsSubscription** raw, natsMsgHandler cb, void* closure) {
+          jsSubOptions sub_opts{};
+          natsStatus s = jsSubOptions_Init(&sub_opts);
+          if (s != NATS_OK) return s;
+          if (!durable_str.empty()) sub_opts.Config.Durable = durable_str.c_str();
+          sub_opts.ManualAck = manual_ack;
+          return js_Subscribe(raw, ctx_, subject_str.c_str(), cb, closure, nullptr, &sub_opts, nullptr);
+        });
   }
 
   // -------------------------------------------------------------------------
@@ -653,7 +686,22 @@ class jetstream {
     if (ctx_ == nullptr) throw nats_error(NATS_INVALID_ARG, "jetstream: not initialized");
   }
 
-  // Extracts a stream_info from a raw jsStreamInfo pointer (never null-checks — caller must ensure).
+  // Fills native from opts; returns whether any option is set. The strings stay owned by opts.
+  static bool to_native_pub_options(const js_publish_options& opts, jsPubOptions& native) {
+    throw_on_error(jsPubOptions_Init(&native), "jsPubOptions_Init");
+    bool has_opts = false;
+    if (!opts.msg_id.empty())                { native.MsgId = opts.msg_id.c_str(); has_opts = true; }
+    if (!opts.expected_stream.empty())       { native.ExpectStream = opts.expected_stream.c_str(); has_opts = true; }
+    if (!opts.expected_last_msg_id.empty())  { native.ExpectLastMsgId = opts.expected_last_msg_id.c_str(); has_opts = true; }
+    if (opts.expected_last_seq > 0)          { native.ExpectLastSeq = opts.expected_last_seq; has_opts = true; }
+    if (opts.expected_last_subject_seq > 0)  { native.ExpectLastSubjectSeq = opts.expected_last_subject_seq; has_opts = true; }
+    if (opts.expect_no_message)              { native.ExpectNoMessage = true; has_opts = true; }
+    if (opts.max_wait_ms > 0)                { native.MaxWait = opts.max_wait_ms; has_opts = true; }
+    if (opts.msg_ttl_ms > 0)                 { native.MsgTTL = opts.msg_ttl_ms; has_opts = true; }
+    return has_opts;
+  }
+
+  // Extracts a stream_info from a raw jsStreamInfo pointer; a null pointer yields an empty stream_info.
   static stream_info extract_stream_info(const jsStreamInfo* si) {
     stream_info out;
     if (si == nullptr) return out;
@@ -689,6 +737,7 @@ class jetstream {
     for (const auto& s : config.subjects) subjects.push_back(s.c_str());
 
     jsStreamConfig native{};
+    throw_on_error(jsStreamConfig_Init(&native), "jsStreamConfig_Init");  // keeps nats.c defaults for unset fields
     native.Name        = config.name.c_str();
     native.Subjects    = subjects.empty() ? nullptr : subjects.data();
     native.SubjectsLen = static_cast<int>(subjects.size());
@@ -722,8 +771,13 @@ class jetstream {
     if (config.type == js_consumer_type::push && config.deliver_subject.empty()) {
       throw std::invalid_argument("push consumer requires deliver_subject");
     }
+    if (!config.filter_subject.empty() && !config.filter_subjects.empty()) {
+      throw std::invalid_argument("set filter_subject or filter_subjects, not both");
+    }
+    check_valid();  // after the argument checks, which need no server
 
     jsConsumerConfig consumer_config{};
+    throw_on_error(jsConsumerConfig_Init(&consumer_config), "jsConsumerConfig_Init");
     consumer_config.Durable       = config.durable_name.c_str();
     consumer_config.Description   = config.description ? config.description->c_str() : nullptr;
     consumer_config.DeliverPolicy = static_cast<jsDeliverPolicy>(config.deliver_policy);

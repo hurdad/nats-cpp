@@ -1,0 +1,16 @@
+# Tests inherit ../.clang-tidy, minus checks that only make noise in test code: negative tests swallow
+# exceptions on purpose, fixtures use C arrays and globals (OpenSSL callbacks get no user data), and tests
+# exercise the API exactly as users write it (e.g. calling static members through an instance).
+InheritParentConfig: true
+Checks: >
+  -bugprone-empty-catch,
+  -modernize-use-ranges,
+  -readability-static-accessed-through-instance,
+  -cppcoreguidelines-avoid-c-arrays,
+  -modernize-avoid-c-arrays,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-missing-std-forward,
+  -performance-inefficient-vector-operation,
+  -readability-ambiguous-smartptr-reset-call

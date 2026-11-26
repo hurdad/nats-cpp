@@ -25,8 +25,8 @@
  * @endcode
  *
  * @code
- * // RPC request/reply
- * natscpp::connection nc;
+ * // RPC request/reply (needs a responder on svc.echo)
+ * natscpp::connection nc({.url = "nats://localhost:4222"});
  * auto reply = nc.request_sync("svc.echo", "hello", std::chrono::seconds(2));
  *
  * auto fut = nc.request_async("svc.echo", "hello async");
@@ -35,7 +35,7 @@
  *
  * @code
  * // Asynchronous callback subscribe
- * natscpp::connection nc;
+ * natscpp::connection nc({.url = "nats://localhost:4222"});
  * auto sub = nc.subscribe_async("events.created", [](natscpp::message msg) {
  *   std::cout << msg.subject() << ": " << msg.data() << "\n";
  * });
@@ -43,7 +43,7 @@
  *
  * @code
  * // JetStream publish + pull consumer
- * natscpp::connection nc;
+ * natscpp::connection nc({.url = "nats://localhost:4222"});
  * natscpp::jetstream js(nc);
  * js.create_stream({.name = "ORDERS", .subjects = {"orders.>"}});
  * js.create_consumer_group({
@@ -54,17 +54,12 @@
  * });
  * js.publish("orders.created", R"({"order_id":"A-1"})");
  * auto pull = js.pull_subscribe("orders.created", "orders-worker");
- * auto pulled_msg = pull.next(std::chrono::seconds(1));
+ * for (auto& m : pull.fetch(10, std::chrono::seconds(1))) m.ack();
  * @endcode
  *
  * @code
  * // Trace propagation via headers
- * natscpp::connection nc;
- * auto inbox = nc.new_inbox();
- *
- * natsMsg* raw{};
- * natsMsg_Create(&raw, "trace.subject", nullptr, "payload", 7);
- * natscpp::message msg(raw);
+ * auto msg = natscpp::message::create("trace.subject", "", "payload");
  * natscpp::message_trace_carrier carrier(msg);
  *
  * std::vector<std::pair<std::string, std::string>> trace_kv = {

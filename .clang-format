@@ -1,0 +1,6 @@
+# Check: clang-format --dry-run --Werror <files>   Fix: clang-format -i <files>   (clang-format 18+)
+BasedOnStyle: Google
+ColumnLimit: 120
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Preserve

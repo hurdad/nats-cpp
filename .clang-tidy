@@ -1,0 +1,64 @@
+# clang-tidy for natscpp. CI runs it on the tests and examples, which compile every header:
+#   run-clang-tidy -p <build-dir> tests/ examples/
+#
+# Disabled checks and why:
+#   bugprone-easily-swappable-parameters   the nats.c-shaped API has many (string, string) parameters
+#   bugprone-multi-level-implicit-pointer-conversion, cppcoreguidelines-no-malloc,
+#   cppcoreguidelines-pro-type-const-cast, cppcoreguidelines-owning-memory
+#                                          freeing arrays that nats.c allocates needs free() on const char**
+#   cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic,
+#   cppcoreguidelines-pro-type-vararg      byte buffers and fprintf at the C boundary
+#   cppcoreguidelines-special-member-functions  flags the small local RAII guards around nats.c lists
+#   cppcoreguidelines-avoid-const-or-ref-data-members  trace carriers hold a reference by design
+#   cert-err33-c                           unchecked fprintf of diagnostics in callbacks
+#   concurrency-mt-unsafe                  getenv in tests and examples
+#   misc-const-correctness                 noisy for test locals
+#   misc-include-cleaner                   reports the umbrella-header style
+#   performance-enum-size                  enums mirror the nats.c enums' underlying type
+#   modernize-use-scoped-lock              lock_guard over a single mutex is fine
+#   modernize-use-trailing-return-type, readability-identifier-length, readability-magic-numbers,
+#   cppcoreguidelines-avoid-magic-numbers, readability-braces-around-statements,
+#   readability-implicit-bool-conversion, readability-uppercase-literal-suffix,
+#   readability-function-cognitive-complexity, readability-named-parameter   style, not correctness
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  cert-*,
+  -cert-err33-c,
+  concurrency-*,
+  -concurrency-mt-unsafe,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-no-malloc,
+  -cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-special-member-functions,
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-avoid-do-while,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-const-correctness,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -modernize-use-scoped-lock,
+  performance-*,
+  -performance-enum-size,
+  readability-*,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-implicit-bool-conversion,
+  -readability-braces-around-statements,
+  -readability-uppercase-literal-suffix,
+  -readability-named-parameter
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(include/natscpp|tests|examples)/.*'
+FormatStyle: file

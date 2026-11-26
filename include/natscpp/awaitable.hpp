@@ -4,6 +4,7 @@
 #include <coroutine>
 #include <chrono>
 #include <future>
+#include <memory>
 #include <thread>
 #include <utility>
 
@@ -32,7 +33,14 @@ class future_awaitable {
   explicit future_awaitable(std::future<T> fut)
       : state_(std::make_shared<shared_state>(std::move(fut))) {}
 
+  // Move-only: destroying any copy would cancel the pending resume and leave the coroutine suspended forever.
+  future_awaitable(const future_awaitable&) = delete;
+  future_awaitable& operator=(const future_awaitable&) = delete;
+  future_awaitable(future_awaitable&&) noexcept = default;
+  future_awaitable& operator=(future_awaitable&&) = delete;
+
   ~future_awaitable() {
+    if (!state_) return;  // moved from
     // Race to claim cancellation.  The thread uses a CAS to atomically flip
     // alive true→false; the destructor uses exchange for the same effect.
     // Whichever wins sets alive=false first; the other side is a no-op.

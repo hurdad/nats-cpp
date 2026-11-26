@@ -296,7 +296,7 @@ void test_trace_carrier_concept_and_helpers() {
   assert(extracted.size() == 2);
   assert(extracted["traceparent"] == "00-4bf92f3577b34da6a3ce929d0e0e4736");
   assert(extracted["tracestate"] == "rojo=00f067aa0ba902b7");
-  assert(extracted.find("missing") == extracted.end());
+  assert(!extracted.contains("missing"));
 }
 
 void test_message_trace_carrier_reads_and_writes_headers() {
@@ -581,7 +581,7 @@ void test_message_empty_payload() {
   auto msg = natscpp::message::create("s", "", "");
   assert(msg.valid());
   assert(msg.data().empty());
-  assert(msg.data().size() == 0);
+  assert(msg.data().empty());
 }
 
 void test_message_binary_payload_with_null_bytes() {
