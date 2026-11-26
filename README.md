@@ -29,6 +29,7 @@ client: core NATS, JetStream and KeyValue, with RAII handles and sync, callback 
 - [Threading and callback lifetimes](#threading-and-callback-lifetimes)
 - [Includes](#includes)
 - [Development](#development)
+- [License](#license)
 
 ## Features
 
@@ -793,3 +794,7 @@ cmake --build build-asan
 # The suppressions cover a leak inside nats.c itself (see the file); without them the KV tests fail.
 LSAN_OPTIONS=suppressions=$PWD/tests/ci/lsan.supp ctest --test-dir build-asan --output-on-failure
 ```
+
+## License
+
+Apache 2.0; see [LICENSE](LICENSE). The bundled nats.c (`third_party/nats.c`) is also Apache 2.0.
