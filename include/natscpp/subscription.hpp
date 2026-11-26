@@ -376,10 +376,14 @@ subscription make_async_subscription(std::function<void(message)> handler, const
   auto state = std::make_shared<async_sub_state>();
   state->handler = std::move(handler);
 
+  // Allocated before subscribing: once subscribed, nats.c may already be running the handler, so nothing after
+  // that point may throw and free the state under it.
+  auto nats_ref_owner = std::make_unique<std::shared_ptr<async_sub_state>>(state);
+
   natsSubscription* raw{};
   throw_on_error(do_subscribe(&raw, &async_sub_state::on_message, state.get()), context_name);
 
-  auto* nats_ref = new std::shared_ptr<async_sub_state>(state);
+  auto* nats_ref = nats_ref_owner.release();
   const natsStatus status = natsSubscription_SetOnCompleteCB(raw, &async_sub_state::on_nats_complete, nats_ref);
   if (status != NATS_OK) {
     // The subscription closed before the callback could be set (e.g. its connection closed concurrently).

@@ -746,20 +746,27 @@ int64_t now_ns = natscpp::nats_NowInNanoSeconds();
 
 ## Input validation
 
-nats.c writes subjects and header keys into the NATS protocol without checking them when publishing, and takes
-all text as C strings. natscpp checks text before handing it to nats.c, so input from untrusted sources cannot
-inject protocol lines or headers, or be silently cut short:
+nats.c writes subjects, header keys, and stream and consumer names into the NATS protocol with few or no checks,
+copies connection credentials and JetStream config strings into JSON without escaping them, and takes all text
+as C strings. natscpp checks or escapes text before handing it to nats.c, so input from untrusted sources cannot
+inject protocol lines, headers or JSON fields, or be silently cut short:
 
 | Input | Rule | Error |
 |---|---|---|
 | Publish / request subjects and reply subjects | non-empty, no whitespace or control characters, no empty tokens, no `*` / `>` | `NATS_INVALID_SUBJECT` |
 | Subscribe subjects | the same, but `*` and `>` allowed as whole tokens (`>` last) | `NATS_INVALID_SUBJECT` |
 | Header keys | visible ASCII without `:` | `NATS_INVALID_ARG` |
-| Header values | no CR, LF or NUL | `NATS_INVALID_ARG` |
+| Header values (and `js_publish_options` `msg_id`, `expected_stream`, `expected_last_msg_id`) | no CR, LF or NUL | `NATS_INVALID_ARG` |
+| Stream, consumer (durable) and deliver group names | no whitespace, control characters, `.`, `*`, `>`, `/`, `\`, `"` | `NATS_INVALID_ARG` |
+| Subjects in JetStream configs and subscriptions (stream subjects, filter and deliver subjects) | subscribe-subject rules, and no `"` or `\` | `NATS_INVALID_SUBJECT` |
+| KV watch, history and key filters | no whitespace, control characters or `"` | `NATS_INVALID_ARG` |
+| `user`, `password`, `token`, connection `name`; stream, consumer and KV descriptions | any text except NUL: escaped for JSON, so it arrives unchanged | `NATS_INVALID_ARG` |
 | Everything else (names, keys, queue groups, string payloads, `nats_Sign` input) | no NUL bytes | `NATS_INVALID_ARG` |
 
 All of these throw `natscpp::nats_error`. `publish(message)`, `request(message)` and `publish_msg` also check
-messages that were built from a raw `natsMsg`.
+messages that were built from a raw `natsMsg`. natscpp cannot escape what it does not pass to nats.c: credentials
+embedded in a server URL (`nats://user:pass@host`) and the token a `token_handler_cb` returns are sent as-is, so
+they must not contain `"`, `\` or control characters.
 
 ## Threading and callback lifetimes
 

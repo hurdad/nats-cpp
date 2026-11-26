@@ -248,6 +248,137 @@ void test_last_error_reports_instead_of_throwing() {
   assert(status_of([&] { unset.process_write_event(); }) == NATS_INVALID_ARG);
 }
 
+void test_name_and_json_text_rules() {
+  using natscpp::detail::config_subject;
+  using natscpp::detail::json_text;
+  using natscpp::detail::kv_key_filter;
+  using natscpp::detail::name;
+  for (const char* ok : {"ORDERS", "orders-v2", "a_b", "x=1"}) assert(name(ok, "test") == ok);
+  assert(name("", "test", true).empty());
+  for (const auto& bad : {""s, "a.b"s, "a b"s, "a\tb"s, "a\r\nb"s, "a*"s, "a>"s, "a/b"s, "a\\b"s, "a\"b"s, "a\0b"s}) {
+    assert(status_of([&] { (void)name(bad, "test"); }) == NATS_INVALID_ARG);
+  }
+  assert(config_subject("orders.*.created", "test") == "orders.*.created");
+  for (const auto& bad : {"a\"b"s, "a\\b"s, "a b"s, ""s}) {
+    assert(status_of([&] { (void)config_subject(bad, "test"); }) == NATS_INVALID_SUBJECT);
+  }
+  assert(kv_key_filter("users.*", "test") == "users.*");
+  for (const auto& bad : {""s, "a\"b"s, "a b"s, "a\nb"s}) {
+    assert(status_of([&] { (void)kv_key_filter(bad, "test"); }) == NATS_INVALID_ARG);
+  }
+  assert(json_text("plain", "test") == "plain");
+  assert(json_text("a\"b\\c", "test") == "a\\\"b\\\\c");
+  assert(json_text("a\r\nb\x7f", "test") == "a\\u000d\\u000ab\\u007f");
+  assert(status_of([] { (void)json_text("a\0b"s, "test"); }) == NATS_INVALID_ARG);
+}
+
+// nats.c checks stream names only for '.' (consumer names also for ' ', '*', '>') before putting them into the
+// JetStream API subject, so a tab and CR/LF used to inject protocol lines through every stream/consumer call.
+void test_jetstream_names_reject_protocol_injection() {
+  auto nc = connect_or_skip("JetStream name injection");
+  if (!nc) return;
+  auto observer = natscpp::connection::connect_to("nats://127.0.0.1:4222");
+  auto spy = observer.subscribe_sync("secinjected");
+  observer.flush(2s);
+  natscpp::jetstream js(*nc);
+  const std::string inj = "x\t0\r\n\r\nPUB\tsecinjected\t4\r\npwnd\r\nPUB\tz";
+
+  assert(status_of([&] { (void)js.get_stream_info(inj); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { js.purge_stream(inj); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { js.delete_stream(inj); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.get_msg(inj, 1); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.get_last_msg(inj, "a"); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { js.delete_msg(inj, 1); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { js.erase_msg(inj, 1); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.list_consumer_groups(inj); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.list_consumer_group_names(inj); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.get_consumer_group("S", inj); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { js.delete_consumer_group("S", inj); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.create_stream({.name = inj}); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.create_consumer_group({.stream = inj, .durable_name = "d"}); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.create_consumer_group({.stream = "S", .durable_name = inj}); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.pull_subscribe("a", inj); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)js.push_subscribe("a", inj); }) == NATS_INVALID_ARG);
+
+  nc->flush(2s);
+  assert(nc->connected());  // a malformed request used to make the server drop the connection
+  assert(status_of([&] { (void)spy.next_message(300ms); }) == NATS_TIMEOUT);
+}
+
+// nats.c writes config strings into the JSON request unescaped: a description could add fields (deny_delete), a
+// subject could add subjects, a filter subject could set max_deliver. Descriptions are now escaped and arrive
+// intact; subjects with '"' or '\' are rejected.
+void test_jetstream_config_json_is_not_injectable() {
+  auto nc = connect_or_skip("JetStream config JSON");
+  if (!nc) return;
+  natscpp::jetstream js(*nc);
+  const std::string stream = unique("SECJSON");
+  const std::string description = "d\",\"deny_delete\":true,\"x\":\"\\ \r\n";
+  (void)js.create_stream({.name = stream, .subjects = {"secjson." + stream}, .description = description});
+
+  jsCtx* ctx = nullptr;
+  assert(natsConnection_JetStream(&ctx, nc->native_handle(), nullptr) == NATS_OK);
+  jsStreamInfo* si = nullptr;
+  assert(js_GetStreamInfo(&si, ctx, stream.c_str(), nullptr, nullptr) == NATS_OK);
+  assert(!si->Config->DenyDelete);                                   // was set by the description
+  assert(std::string_view(si->Config->Description) == description);  // and the text arrives intact
+  jsStreamInfo_Destroy(si);
+
+  assert(status_of([&] { (void)js.create_stream({.name = stream + "B", .subjects = {"a\",\"b.>"}}); }) ==
+         NATS_INVALID_SUBJECT);
+  assert(status_of([&] {
+           (void)js.create_consumer_group(
+               {.stream = stream, .durable_name = "C", .filter_subject = "secjson.x\",\"max_deliver\":2,\"y\":\""});
+         }) == NATS_INVALID_SUBJECT);
+  const std::string consumer_description = R"(c","max_deliver":2,"y":")";
+  (void)js.create_consumer_group({.stream = stream, .durable_name = "C", .description = consumer_description});
+  jsConsumerInfo* ci = nullptr;
+  assert(js_GetConsumerInfo(&ci, ctx, stream.c_str(), "C", nullptr, nullptr) == NATS_OK);
+  assert(ci->Config->MaxDeliver != 2);
+  assert(std::string_view(ci->Config->Description) == consumer_description);
+  jsConsumerInfo_Destroy(ci);
+  jsCtx_Destroy(ctx);
+  js.delete_stream(stream);
+
+  const std::string bucket = unique("SECJSONKV");
+  natscpp::kv_config cfg;
+  cfg.bucket = bucket;
+  cfg.description = R"(k","deny_delete":true,"x":")";
+  auto kv = natscpp::key_value::create(*nc, cfg);
+  assert(status_of([&] { (void)kv.watch("a\",\"b"); }) == NATS_INVALID_ARG);
+  assert(status_of([&] { (void)kv.history("a b"); }) == NATS_INVALID_ARG);
+  assert(js.get_stream_info("KV_" + bucket).description == cfg.description);
+  natscpp::key_value::delete_bucket(*nc, bucket);
+}
+
+// nats.c copies user, password, token and name into the CONNECT JSON unescaped: a name with CR/LF injected
+// protocol lines, a name could add credentials, and a password containing '"' or '\' could never authenticate.
+void test_connect_fields_are_escaped() {
+  const char* auth_url = std::getenv("NATSCPP_TEST_AUTH_URL");
+  if (auth_url == nullptr || *auth_url == '\0') {
+    unit_tests::skip("CONNECT escaping (NATSCPP_TEST_AUTH_URL not set)");
+    return;
+  }
+  natscpp::connection_options quote;
+  quote.url = auth_url;
+  quote.user = "quote";
+  quote.password = "pa\"ss\\word";  // as configured in tests/ci/start-servers.sh
+  quote.name = "name with \"quotes\", \\ and \r\nPUB secinjected 4\r\npwnd";
+  natscpp::connection nc(quote);
+  assert(nc.connected());
+
+  natscpp::connection_options smuggled;  // no credentials of its own; the name used to add alice's
+  smuggled.url = auth_url;
+  smuggled.name = R"(n","user":"alice","pass":"secret)";
+  assert(status_of([&] { natscpp::connection c(smuggled); }) != NATS_OK);
+
+  natscpp::connection_options nul;
+  nul.url = auth_url;
+  nul.password = "a\0b"s;
+  nul.user = "alice";
+  assert(status_of([&] { natscpp::connection c(nul); }) == NATS_INVALID_ARG);
+}
+
 }  // namespace
 
 namespace unit_tests {
@@ -259,6 +390,7 @@ std::vector<test_case> security_unit_tests() {
       NATSCPP_TEST_CASE("unit", test_messages_and_headers_reject_injection),
       NATSCPP_TEST_CASE("unit", test_sign_rejects_embedded_nul),
       NATSCPP_TEST_CASE("unit", test_raw_message_reply_and_sign_ok),
+      NATSCPP_TEST_CASE("unit", test_name_and_json_text_rules),
   };
 }
 
@@ -268,6 +400,9 @@ std::vector<test_case> security_server_tests() {
       NATSCPP_TEST_CASE("integration", test_jetstream_rejects_injection),
       NATSCPP_TEST_CASE("integration", test_kv_rejects_embedded_nul),
       NATSCPP_TEST_CASE("integration", test_last_error_reports_instead_of_throwing),
+      NATSCPP_TEST_CASE("integration", test_jetstream_names_reject_protocol_injection),
+      NATSCPP_TEST_CASE("integration", test_jetstream_config_json_is_not_injectable),
+      NATSCPP_TEST_CASE("tls", test_connect_fields_are_escaped),
   };
 }
 

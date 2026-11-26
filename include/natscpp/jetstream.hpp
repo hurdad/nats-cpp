@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <natscpp/connection.hpp>
+#include <natscpp/detail/validate.hpp>
 #include <natscpp/error.hpp>
 #include <natscpp/message.hpp>
 #include <natscpp/subscription.hpp>
@@ -371,15 +372,17 @@ class jetstream {
   [[nodiscard]] js_pull_consumer pull_subscribe(std::string_view stream_subject, std::string_view durable_name) {
     check_valid();
     natsSubscription* sub{};
-    throw_on_error(js_PullSubscribe(&sub, ctx_, detail::c_string(stream_subject, "stream_subject").c_str(),
-                                    detail::c_string(durable_name, "durable_name").c_str(), nullptr, nullptr, nullptr),
+    throw_on_error(js_PullSubscribe(&sub, ctx_, detail::config_subject(stream_subject, "pull_subscribe").c_str(),
+                                    detail::name(durable_name, "pull_subscribe durable_name", true).c_str(), nullptr,
+                                    nullptr, nullptr),
                    "js_PullSubscribe");
     return js_pull_consumer{sub};
   }
 
   [[nodiscard]] js_push_consumer push_subscribe(std::string_view stream_subject, std::string_view durable_name) {
     check_valid();
-    std::string durable_str = detail::c_string(durable_name, "durable_name");
+    const std::string subject_str = detail::config_subject(stream_subject, "push_subscribe");
+    std::string durable_str = detail::name(durable_name, "push_subscribe durable_name", true);
     jsSubOptions sub_opts{};
     throw_on_error(jsSubOptions_Init(&sub_opts), "jsSubOptions_Init");
     if (!durable_str.empty()) {
@@ -387,9 +390,9 @@ class jetstream {
     }
 
     natsSubscription* sub{};
-    throw_on_error(js_SubscribeSync(&sub, ctx_, detail::c_string(stream_subject, "stream_subject").c_str(), nullptr,
-                                    durable_str.empty() ? nullptr : &sub_opts, nullptr),
-                   "js_SubscribeSync");
+    throw_on_error(
+        js_SubscribeSync(&sub, ctx_, subject_str.c_str(), nullptr, durable_str.empty() ? nullptr : &sub_opts, nullptr),
+        "js_SubscribeSync");
     return js_push_consumer{sub};
   }
 
@@ -407,8 +410,8 @@ class jetstream {
   [[nodiscard]] subscription subscribe_async(std::string_view stream_subject, std::string_view durable_name,
                                              std::function<void(message)> handler, bool manual_ack = false) {
     check_valid();
-    std::string subject_str = detail::subject(stream_subject, "jetstream::subscribe_async", true);
-    std::string durable_str = detail::c_string(durable_name, "durable_name");
+    std::string subject_str = detail::config_subject(stream_subject, "jetstream::subscribe_async");
+    std::string durable_str = detail::name(durable_name, "jetstream::subscribe_async durable_name", true);
     return detail::make_async_subscription(
         std::move(handler), "js_Subscribe",
         [this, &subject_str, &durable_str, manual_ack](natsSubscription** raw, natsMsgHandler cb, void* closure) {
@@ -430,9 +433,9 @@ class jetstream {
     if (config.name.empty()) {
       throw std::invalid_argument("stream name cannot be empty");
     }
-    auto [subjects, native_cfg] = build_stream_config(config);
+    native_stream_config native(config);
     jsStreamInfo* si_raw{};
-    throw_on_error(js_AddStream(&si_raw, ctx_, &native_cfg, nullptr, nullptr), "js_AddStream");
+    throw_on_error(js_AddStream(&si_raw, ctx_, &native.cfg, nullptr, nullptr), "js_AddStream");
     stream_info out;
     if (si_raw != nullptr) {
       std::unique_ptr<jsStreamInfo, void (*)(jsStreamInfo*)> holder(si_raw, jsStreamInfo_Destroy);
@@ -448,9 +451,9 @@ class jetstream {
     if (config.name.empty()) {
       throw std::invalid_argument("stream name cannot be empty");
     }
-    auto [subjects, native_cfg] = build_stream_config(config);
+    native_stream_config native(config);
     jsStreamInfo* si_raw{};
-    throw_on_error(js_UpdateStream(&si_raw, ctx_, &native_cfg, nullptr, nullptr), "js_UpdateStream");
+    throw_on_error(js_UpdateStream(&si_raw, ctx_, &native.cfg, nullptr, nullptr), "js_UpdateStream");
     stream_info out;
     if (si_raw != nullptr) {
       std::unique_ptr<jsStreamInfo, void (*)(jsStreamInfo*)> holder(si_raw, jsStreamInfo_Destroy);
@@ -464,20 +467,21 @@ class jetstream {
   void delete_stream(std::string_view name) {
     check_valid();
     if (name.empty()) throw std::invalid_argument("stream name cannot be empty");
-    throw_on_error(js_DeleteStream(ctx_, detail::c_string(name, "name").c_str(), nullptr, nullptr), "js_DeleteStream");
+    throw_on_error(js_DeleteStream(ctx_, detail::name(name, "stream name").c_str(), nullptr, nullptr),
+                   "js_DeleteStream");
   }
 
   void purge_stream(std::string_view name) {
     check_valid();
     if (name.empty()) throw std::invalid_argument("stream name cannot be empty");
-    throw_on_error(js_PurgeStream(ctx_, detail::c_string(name, "name").c_str(), nullptr, nullptr), "js_PurgeStream");
+    throw_on_error(js_PurgeStream(ctx_, detail::name(name, "stream name").c_str(), nullptr, nullptr), "js_PurgeStream");
   }
 
   [[nodiscard]] stream_info get_stream_info(std::string_view name) {
     check_valid();
     if (name.empty()) throw std::invalid_argument("stream name cannot be empty");
     jsStreamInfo* si_raw{};
-    throw_on_error(js_GetStreamInfo(&si_raw, ctx_, detail::c_string(name, "name").c_str(), nullptr, nullptr),
+    throw_on_error(js_GetStreamInfo(&si_raw, ctx_, detail::name(name, "stream name").c_str(), nullptr, nullptr),
                    "js_GetStreamInfo");
     stream_info out;
     if (si_raw != nullptr) {
@@ -535,8 +539,7 @@ class jetstream {
   [[nodiscard]] message get_msg(std::string_view stream, uint64_t seq) {
     check_valid();
     natsMsg* msg{};
-    throw_on_error(js_GetMsg(&msg, ctx_, detail::c_string(stream, "stream").c_str(), seq, nullptr, nullptr),
-                   "js_GetMsg");
+    throw_on_error(js_GetMsg(&msg, ctx_, detail::name(stream, "stream").c_str(), seq, nullptr, nullptr), "js_GetMsg");
     return message{msg};
   }
 
@@ -546,8 +549,8 @@ class jetstream {
   [[nodiscard]] message get_last_msg(std::string_view stream, std::string_view subject) {
     check_valid();
     natsMsg* msg{};
-    throw_on_error(js_GetLastMsg(&msg, ctx_, detail::c_string(stream, "stream").c_str(),
-                                 detail::c_string(subject, "subject").c_str(), nullptr, nullptr),
+    throw_on_error(js_GetLastMsg(&msg, ctx_, detail::name(stream, "stream").c_str(),
+                                 detail::config_subject(subject, "get_last_msg subject").c_str(), nullptr, nullptr),
                    "js_GetLastMsg");
     return message{msg};
   }
@@ -557,8 +560,7 @@ class jetstream {
    */
   void delete_msg(std::string_view stream, uint64_t seq) {
     check_valid();
-    throw_on_error(js_DeleteMsg(ctx_, detail::c_string(stream, "stream").c_str(), seq, nullptr, nullptr),
-                   "js_DeleteMsg");
+    throw_on_error(js_DeleteMsg(ctx_, detail::name(stream, "stream").c_str(), seq, nullptr, nullptr), "js_DeleteMsg");
   }
 
   /**
@@ -566,7 +568,7 @@ class jetstream {
    */
   void erase_msg(std::string_view stream, uint64_t seq) {
     check_valid();
-    throw_on_error(js_EraseMsg(ctx_, detail::c_string(stream, "stream").c_str(), seq, nullptr, nullptr), "js_EraseMsg");
+    throw_on_error(js_EraseMsg(ctx_, detail::name(stream, "stream").c_str(), seq, nullptr, nullptr), "js_EraseMsg");
   }
 
   // -------------------------------------------------------------------------
@@ -591,8 +593,8 @@ class jetstream {
     }
 
     jsConsumerInfo* consumer_info_raw{};
-    throw_on_error(js_GetConsumerInfo(&consumer_info_raw, ctx_, detail::c_string(stream, "stream").c_str(),
-                                      detail::c_string(durable_name, "durable_name").c_str(), nullptr, nullptr),
+    throw_on_error(js_GetConsumerInfo(&consumer_info_raw, ctx_, detail::name(stream, "stream").c_str(),
+                                      detail::name(durable_name, "durable_name").c_str(), nullptr, nullptr),
                    "js_GetConsumerInfo");
 
     consumer_info out{};
@@ -614,8 +616,8 @@ class jetstream {
       throw std::invalid_argument("consumer durable name cannot be empty");
     }
 
-    throw_on_error(js_DeleteConsumer(ctx_, detail::c_string(stream, "stream").c_str(),
-                                     detail::c_string(durable_name, "durable_name").c_str(), nullptr, nullptr),
+    throw_on_error(js_DeleteConsumer(ctx_, detail::name(stream, "stream").c_str(),
+                                     detail::name(durable_name, "durable_name").c_str(), nullptr, nullptr),
                    "js_DeleteConsumer");
   }
 
@@ -627,7 +629,7 @@ class jetstream {
 
     jsConsumerInfoList* consumer_info_list_raw{};
     throw_on_error(
-        js_Consumers(&consumer_info_list_raw, ctx_, detail::c_string(stream, "stream").c_str(), nullptr, nullptr),
+        js_Consumers(&consumer_info_list_raw, ctx_, detail::name(stream, "stream").c_str(), nullptr, nullptr),
         "js_Consumers");
 
     std::vector<consumer_info> out;
@@ -660,7 +662,7 @@ class jetstream {
 
     jsConsumerNamesList* consumer_names_list_raw{};
     throw_on_error(
-        js_ConsumerNames(&consumer_names_list_raw, ctx_, detail::c_string(stream, "stream").c_str(), nullptr, nullptr),
+        js_ConsumerNames(&consumer_names_list_raw, ctx_, detail::name(stream, "stream").c_str(), nullptr, nullptr),
         "js_ConsumerNames");
 
     std::vector<std::string> out;
@@ -704,6 +706,10 @@ class jetstream {
 
   // Fills native from opts; returns whether any option is set. The strings stay owned by opts.
   static bool to_native_pub_options(const js_publish_options& opts, jsPubOptions& native) {
+    // Sent as header values (Nats-Msg-Id, Nats-Expected-Stream, ...): no CR, LF or NUL.
+    (void)detail::header_value(opts.msg_id, "msg_id");
+    (void)detail::header_value(opts.expected_stream, "expected_stream");
+    (void)detail::header_value(opts.expected_last_msg_id, "expected_last_msg_id");
     throw_on_error(jsPubOptions_Init(&native), "jsPubOptions_Init");
     bool has_opts = false;
     if (!opts.msg_id.empty()) {
@@ -770,36 +776,51 @@ class jetstream {
     return out;
   }
 
-  // Returns {subjects_storage, native_config} — subjects_storage must outlive native_config.
-  static std::pair<std::vector<const char*>, jsStreamConfig> build_stream_config(const js_stream_config& config) {
+  // A jsStreamConfig and the checked strings it points into (nats.c writes them into JSON unescaped).
+  struct native_stream_config {
+    std::string name;
+    std::string description;
+    std::vector<std::string> subject_storage;
     std::vector<const char*> subjects;
-    subjects.reserve(config.subjects.size());
-    for (const auto& s : config.subjects) subjects.push_back(s.c_str());
+    jsStreamConfig cfg{};
 
-    jsStreamConfig native{};
-    throw_on_error(jsStreamConfig_Init(&native), "jsStreamConfig_Init");  // keeps nats.c defaults for unset fields
-    native.Name = config.name.c_str();
-    native.Subjects = subjects.empty() ? nullptr : subjects.data();
-    native.SubjectsLen = static_cast<int>(subjects.size());
-    native.Description = config.description ? config.description->c_str() : nullptr;
-    native.Storage = static_cast<jsStorageType>(config.storage);
-    native.Retention = static_cast<jsRetentionPolicy>(config.retention);
-    native.Discard = static_cast<jsDiscardPolicy>(config.discard);
-    native.MaxConsumers = config.max_consumers;
-    native.MaxMsgs = config.max_msgs;
-    native.MaxBytes = config.max_bytes;
-    native.MaxAge = config.max_age_ns;
-    native.MaxMsgsPerSubject = config.max_msgs_per_subject;
-    native.MaxMsgSize = config.max_msg_size;
-    native.Replicas = config.replicas;
-    native.NoAck = config.no_ack;
-    native.Duplicates = config.duplicates_ns;
-    native.AllowDirect = config.allow_direct;
-    native.DenyDelete = config.deny_delete;
-    native.DenyPurge = config.deny_purge;
+    explicit native_stream_config(const js_stream_config& config)
+        : name(detail::name(config.name, "stream name")),
+          description(config.description ? detail::json_text(*config.description, "stream description") : "") {
+      subject_storage.reserve(config.subjects.size());
+      for (const auto& subj : config.subjects) {
+        subject_storage.push_back(detail::config_subject(subj, "stream subject"));
+      }
+      subjects.reserve(subject_storage.size());
+      for (const auto& subj : subject_storage) subjects.push_back(subj.c_str());
 
-    return {std::move(subjects), native};
-  }
+      throw_on_error(jsStreamConfig_Init(&cfg), "jsStreamConfig_Init");  // keeps nats.c defaults for unset fields
+      cfg.Name = name.c_str();
+      cfg.Subjects = subjects.empty() ? nullptr : subjects.data();
+      cfg.SubjectsLen = static_cast<int>(subjects.size());
+      cfg.Description = config.description ? description.c_str() : nullptr;
+      cfg.Storage = static_cast<jsStorageType>(config.storage);
+      cfg.Retention = static_cast<jsRetentionPolicy>(config.retention);
+      cfg.Discard = static_cast<jsDiscardPolicy>(config.discard);
+      cfg.MaxConsumers = config.max_consumers;
+      cfg.MaxMsgs = config.max_msgs;
+      cfg.MaxBytes = config.max_bytes;
+      cfg.MaxAge = config.max_age_ns;
+      cfg.MaxMsgsPerSubject = config.max_msgs_per_subject;
+      cfg.MaxMsgSize = config.max_msg_size;
+      cfg.Replicas = config.replicas;
+      cfg.NoAck = config.no_ack;
+      cfg.Duplicates = config.duplicates_ns;
+      cfg.AllowDirect = config.allow_direct;
+      cfg.DenyDelete = config.deny_delete;
+      cfg.DenyPurge = config.deny_purge;
+    }
+    native_stream_config(const native_stream_config&) = delete;  // cfg points into the members
+    native_stream_config& operator=(const native_stream_config&) = delete;
+    native_stream_config(native_stream_config&&) = delete;
+    native_stream_config& operator=(native_stream_config&&) = delete;
+    ~native_stream_config() = default;
+  };
 
   [[nodiscard]] consumer_info upsert_consumer_group(const js_consumer_config& config, bool update) {
     if (config.stream.empty()) {
@@ -816,18 +837,34 @@ class jetstream {
     }
     check_valid();  // after the argument checks, which need no server
 
+    // nats.c puts the stream and durable names into the API subject and these strings into JSON unescaped.
+    const std::string stream = detail::name(config.stream, "consumer stream");
+    const std::string durable = detail::name(config.durable_name, "consumer durable_name");
+    const std::string description =
+        config.description ? detail::json_text(*config.description, "consumer description") : std::string{};
+    const std::string filter_subject =
+        config.filter_subject.empty() ? std::string{} : detail::config_subject(config.filter_subject, "filter_subject");
+    std::vector<std::string> filter_subjects;
+    filter_subjects.reserve(config.filter_subjects.size());
+    for (const auto& f : config.filter_subjects)
+      filter_subjects.push_back(detail::config_subject(f, "filter_subjects"));
+    std::string deliver_subject;
+    std::string deliver_group;
+    if (config.type == js_consumer_type::push) {
+      deliver_subject = detail::config_subject(config.deliver_subject, "deliver_subject");
+      deliver_group = detail::name(config.deliver_group, "deliver_group", true);
+    }
+
     jsConsumerConfig consumer_config{};
     throw_on_error(jsConsumerConfig_Init(&consumer_config), "jsConsumerConfig_Init");
-    consumer_config.Durable = config.durable_name.c_str();
-    consumer_config.Description = config.description ? config.description->c_str() : nullptr;
+    consumer_config.Durable = durable.c_str();
+    consumer_config.Description = config.description ? description.c_str() : nullptr;
     consumer_config.DeliverPolicy = static_cast<jsDeliverPolicy>(config.deliver_policy);
     consumer_config.AckPolicy = static_cast<jsAckPolicy>(config.ack_policy);
     consumer_config.ReplayPolicy = static_cast<jsReplayPolicy>(config.replay_policy);
     consumer_config.HeadersOnly = config.headers_only;
 
-    if (!config.filter_subject.empty()) {
-      consumer_config.FilterSubject = config.filter_subject.c_str();
-    }
+    if (!filter_subject.empty()) consumer_config.FilterSubject = filter_subject.c_str();
     if (config.ack_wait_ns > 0) consumer_config.AckWait = config.ack_wait_ns;
     if (config.max_deliver >= 0) consumer_config.MaxDeliver = config.max_deliver;
     if (config.max_ack_pending >= 0) consumer_config.MaxAckPending = config.max_ack_pending;
@@ -838,28 +875,26 @@ class jetstream {
     if (config.opt_start_time_ns > 0) consumer_config.OptStartTime = config.opt_start_time_ns;
 
     if (config.type == js_consumer_type::push) {
-      consumer_config.DeliverSubject = config.deliver_subject.c_str();
-      consumer_config.DeliverGroup = config.deliver_group.empty() ? nullptr : config.deliver_group.c_str();
+      consumer_config.DeliverSubject = deliver_subject.c_str();
+      consumer_config.DeliverGroup = deliver_group.empty() ? nullptr : deliver_group.c_str();
     }
 
     // Multi-filter subjects (alternative to single FilterSubject).
     std::vector<const char*> filter_subject_ptrs;
-    if (!config.filter_subjects.empty()) {
-      filter_subject_ptrs.reserve(config.filter_subjects.size());
-      for (const auto& s : config.filter_subjects) filter_subject_ptrs.push_back(s.c_str());
+    if (!filter_subjects.empty()) {
+      filter_subject_ptrs.reserve(filter_subjects.size());
+      for (const auto& f : filter_subjects) filter_subject_ptrs.push_back(f.c_str());
       consumer_config.FilterSubjects = filter_subject_ptrs.data();
       consumer_config.FilterSubjectsLen = static_cast<int>(filter_subject_ptrs.size());
     }
 
     jsConsumerInfo* consumer_info_raw{};
     if (update) {
-      throw_on_error(
-          js_UpdateConsumer(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr, nullptr),
-          "js_UpdateConsumer");
+      throw_on_error(js_UpdateConsumer(&consumer_info_raw, ctx_, stream.c_str(), &consumer_config, nullptr, nullptr),
+                     "js_UpdateConsumer");
     } else {
-      throw_on_error(
-          js_AddConsumer(&consumer_info_raw, ctx_, config.stream.c_str(), &consumer_config, nullptr, nullptr),
-          "js_AddConsumer");
+      throw_on_error(js_AddConsumer(&consumer_info_raw, ctx_, stream.c_str(), &consumer_config, nullptr, nullptr),
+                     "js_AddConsumer");
     }
 
     consumer_info out{

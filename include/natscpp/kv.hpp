@@ -230,7 +230,8 @@ class key_value {
     cfg.MaxBytes = config.max_bytes;
     cfg.StorageType = static_cast<jsStorageType>(config.storage);
     cfg.Replicas = config.replicas;
-    const std::string desc = config.description;
+    // nats.c writes the description into the bucket's stream config JSON unescaped (validate.hpp).
+    const std::string desc = detail::json_text(config.description, "kv description");
     if (!desc.empty()) cfg.Description = desc.c_str();
 
     try {
@@ -309,9 +310,9 @@ class key_value {
     check_valid();
     kvWatcher* watcher{};
     auto native_opts = to_native_watch_options(options);
-    throw_on_error(
-        kvStore_Watch(&watcher, kv_, detail::c_string(key, "key").c_str(), native_opts ? &*native_opts : nullptr),
-        "kvStore_Watch");
+    throw_on_error(kvStore_Watch(&watcher, kv_, detail::kv_key_filter(key, "watch key").c_str(),
+                                 native_opts ? &*native_opts : nullptr),
+                   "kvStore_Watch");
     return kv_watcher{watcher};
   }
 
@@ -319,11 +320,12 @@ class key_value {
                                        const kv_watch_options* options = nullptr) const {
     check_valid();
     kvWatcher* watcher{};
+    std::vector<std::string> checked;
+    checked.reserve(keys.size());
+    for (const auto& key : keys) checked.push_back(detail::kv_key_filter(key, "watch_multi key"));
     std::vector<const char*> key_ptrs;
-    key_ptrs.reserve(keys.size());
-    for (const auto& key : keys) {
-      key_ptrs.push_back(key.c_str());
-    }
+    key_ptrs.reserve(checked.size());
+    for (const auto& key : checked) key_ptrs.push_back(key.c_str());
     auto native_opts = to_native_watch_options(options);
     throw_on_error(kvStore_WatchMulti(&watcher, kv_, key_ptrs.data(), static_cast<int>(key_ptrs.size()),
                                       native_opts ? &*native_opts : nullptr),
@@ -424,9 +426,12 @@ class key_value {
   [[nodiscard]] std::vector<std::string> keys_with_filters(const std::vector<std::string>& filters,
                                                            const kv_watch_options* options = nullptr) const {
     check_valid();
+    std::vector<std::string> checked;
+    checked.reserve(filters.size());
+    for (const auto& f : filters) checked.push_back(detail::kv_key_filter(f, "keys_with_filters filter"));
     std::vector<const char*> filter_ptrs;
-    filter_ptrs.reserve(filters.size());
-    for (const auto& f : filters) filter_ptrs.push_back(f.c_str());
+    filter_ptrs.reserve(checked.size());
+    for (const auto& f : checked) filter_ptrs.push_back(f.c_str());
 
     kvKeysList list{};
     auto native_opts = to_native_watch_options(options);
@@ -452,9 +457,9 @@ class key_value {
     check_valid();
     kvEntryList list{};
     auto native_opts = to_native_watch_options(options);
-    throw_on_error(
-        kvStore_History(&list, kv_, detail::c_string(key, "key").c_str(), native_opts ? &*native_opts : nullptr),
-        "kvStore_History");
+    throw_on_error(kvStore_History(&list, kv_, detail::kv_key_filter(key, "history key").c_str(),
+                                   native_opts ? &*native_opts : nullptr),
+                   "kvStore_History");
     // Transfer ownership of each entry before the guard destroys the list.
     struct list_guard {
       kvEntryList& l;

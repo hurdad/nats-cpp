@@ -91,4 +91,71 @@ inline std::string header_value(std::string_view value, const char* what) {
   return std::string(value);
 }
 
+// Stream, consumer (durable) and queue group names. nats.c puts stream and consumer names into JetStream API
+// subjects (e.g. $JS.API.STREAM.INFO.<stream>) after checking only for '.' (and, for consumers, ' ', '*', '>'),
+// so a name with a tab or CR/LF could inject protocol lines; it also writes them into JSON unescaped. These are
+// the server's naming rules: no whitespace or control characters, '.', '*', '>', path separators or quotes.
+inline std::string name(std::string_view value, const char* what, bool allow_empty = false) {
+  if (value.empty()) {
+    if (allow_empty) return {};
+    invalid_text(NATS_INVALID_ARG, what, value, "name is empty");
+  }
+  for (const char c : value) {
+    const auto u = static_cast<unsigned char>(c);
+    if (u <= 0x20 || u == 0x7f || c == '.' || c == '*' || c == '>' || c == '/' || c == '\\' || c == '"') {
+      invalid_text(NATS_INVALID_ARG, what, value,
+                   "name must not contain whitespace, control characters, '.', '*', '>', '/', '\\' or '\"'");
+    }
+  }
+  return std::string(value);
+}
+
+// Subjects that nats.c writes into JetStream JSON configs and requests without escaping (stream subjects, consumer
+// filter and deliver subjects): a valid subject (wildcards allowed) that also has no '"' or '\'.
+inline std::string config_subject(std::string_view value, const char* what) {
+  std::string out = subject(value, what, true);
+  if (value.find_first_of("\"\\") != std::string_view::npos) {
+    invalid_text(NATS_INVALID_SUBJECT, what, value, "subject must not contain '\"' or '\\' here");
+  }
+  return out;
+}
+
+// KV key filters (watch, history, keys_with_filters): nats.c builds a consumer filter subject from them and writes
+// it into JSON unescaped, without the checks it applies to keys on put/get.
+inline std::string kv_key_filter(std::string_view value, const char* what) {
+  if (value.empty()) invalid_text(NATS_INVALID_ARG, what, value, "key is empty");
+  for (const char c : value) {
+    const auto u = static_cast<unsigned char>(c);
+    if (u <= 0x20 || u == 0x7f || c == '"') {
+      invalid_text(NATS_INVALID_ARG, what, value, "key must not contain whitespace, control characters or '\"'");
+    }
+  }
+  return std::string(value);
+}
+
+// Free text that nats.c copies into JSON between quotes without escaping it: the CONNECT fields (user, password,
+// token, connection name) and descriptions in stream, consumer and KV configs. Escaping it here makes any text
+// arrive intact (a password containing '"' or '\' otherwise never authenticates) and keeps it from adding JSON
+// fields or, in CONNECT, protocol lines. NUL is rejected, since nats.c would cut the text there.
+inline std::string json_text(std::string_view value, const char* what) {
+  std::string out;
+  out.reserve(value.size());
+  for (const char c : value) {
+    const auto u = static_cast<unsigned char>(c);
+    if (c == '\0') invalid_text(NATS_INVALID_ARG, what, value, "contains a NUL byte");
+    if (c == '"' || c == '\\') {
+      out += '\\';
+      out += c;
+    } else if (u < 0x20 || u == 0x7f) {
+      constexpr std::string_view hex = "0123456789abcdef";
+      out += "\\u00";
+      out += hex.at(u >> 4U);
+      out += hex.at(u & 0xfU);
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
 }  // namespace natscpp::detail

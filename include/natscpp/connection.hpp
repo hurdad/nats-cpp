@@ -48,7 +48,8 @@ struct connection_options {
   std::optional<std::string> nkey_public;
   natsSignatureHandler nkey_signature_cb = nullptr;
   void* nkey_signature_closure = nullptr;
-  // Dynamic token handler (callback invoked on each connect/reconnect).
+  // Dynamic token handler (callback invoked on each connect/reconnect). nats.c sends the token it returns as-is
+  // inside the CONNECT JSON: it must not contain '"', '\' or control characters (natscpp cannot escape it).
   natsTokenHandler token_handler_cb = nullptr;
   void* token_handler_closure = nullptr;
 
@@ -704,9 +705,11 @@ class connection {
       throw_on_error(::natsOptions_SetURL(nopts, options.url.c_str()), "natsOptions_SetURL");
     }
 
-    // Authentication
+    // Authentication. nats.c copies user, password, token and name into the CONNECT JSON unescaped; escaping
+    // them here makes any text arrive intact and keeps it from adding fields or protocol lines (validate.hpp).
     if (options.token) {
-      throw_on_error(::natsOptions_SetToken(nopts, options.token->c_str()), "natsOptions_SetToken");
+      throw_on_error(::natsOptions_SetToken(nopts, detail::json_text(*options.token, "token").c_str()),
+                     "natsOptions_SetToken");
     }
     if (options.token_handler_cb) {
       throw_on_error(::natsOptions_SetTokenHandler(nopts, options.token_handler_cb, options.token_handler_closure),
@@ -727,8 +730,9 @@ class connection {
           "natsOptions_SetUserCredentialsFromFiles");
     }
     if (options.user) {  // password is optional; nats.c accepts a NULL password
-      throw_on_error(::natsOptions_SetUserInfo(nopts, options.user->c_str(),
-                                               options.password ? options.password->c_str() : nullptr),
+      const std::string user = detail::json_text(*options.user, "user");
+      const std::string password = options.password ? detail::json_text(*options.password, "password") : std::string{};
+      throw_on_error(::natsOptions_SetUserInfo(nopts, user.c_str(), options.password ? password.c_str() : nullptr),
                      "natsOptions_SetUserInfo");
     }
 
@@ -890,7 +894,8 @@ class connection {
       throw_on_error(::natsOptions_SetTimeout(nopts, options.timeout->count()), "natsOptions_SetTimeout");
     }
     if (options.name) {
-      throw_on_error(::natsOptions_SetName(nopts, options.name->c_str()), "natsOptions_SetName");
+      throw_on_error(::natsOptions_SetName(nopts, detail::json_text(*options.name, "name").c_str()),
+                     "natsOptions_SetName");
     }
     if (options.no_echo) {
       throw_on_error(::natsOptions_SetNoEcho(nopts, *options.no_echo), "natsOptions_SetNoEcho");

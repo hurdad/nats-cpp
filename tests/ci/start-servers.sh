@@ -5,7 +5,7 @@
 #
 # Needs nats-server (or $NATS_SERVER) and openssl. Servers:
 #   4222  plain, JetStream enabled            (integration group)
-#   4223  user "alice" / password "secret"    (tls group: auth)
+#   4223  user "alice" / password "secret", user "quote" / password pa"ss\word  (auth tests)
 #   4443  TLS, certificate issued by intermediate A
 #   4444  TLS, certificate issued by intermediate B
 # Prints NAME=value lines for the test environment: append them to $GITHUB_ENV, or
@@ -56,7 +56,11 @@ EXT
 
 cat > "$work/auth.conf" <<'CONF'
 authorization {
-  users = [ { user: "alice", password: "secret" } ]
+  users = [
+    { user: "alice", password: "secret" }
+    # A password with '"' and '\': nats.c sends CONNECT fields unescaped, natscpp escapes them.
+    { user: "quote", password: "pa\"ss\\word" }
+  ]
 }
 CONF
 

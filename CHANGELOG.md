@@ -15,6 +15,17 @@
 - **Silent truncation at NUL bytes.** Every `std::string_view` argument passed to nats.c as a C string was cut
   at its first NUL byte, so what was sent, looked up or signed (`nats_Sign`) could differ from what the
   application checked. Such arguments are now rejected with `NATS_INVALID_ARG`.
+- **Protocol injection through JetStream stream and consumer names.** nats.c puts these names into the
+  JetStream API subject after checking only for `.` (and, for consumers, space, `*` and `>`), so a name with a
+  tab and CR/LF injected protocol lines through every stream and consumer call. Names now follow the server's
+  rules (no whitespace, control characters, `.`, `*`, `>`, `/`, `\` or `"`; `NATS_INVALID_ARG`).
+- **JSON injection in JetStream and KV configs.** nats.c writes stream, consumer and KV config strings into the
+  JSON request unescaped, so a description, subject or filter subject could set other fields (e.g.
+  `deny_delete`, `max_deliver`, extra stream subjects). Descriptions are now escaped and arrive intact; subjects
+  in configs must be valid and free of `"` and `\` (`NATS_INVALID_SUBJECT`).
+- **CONNECT injection.** nats.c copies `user`, `password`, `token` and the connection `name` into the CONNECT
+  JSON unescaped: a name with CR/LF injected protocol lines, a crafted name could supply credentials, and a
+  password containing `"` or `\` could never authenticate. natscpp now escapes these fields.
 
 ### Fixed
 - `connection::last_error()` threw whenever the connection had an error, so it could never return one. It now
@@ -22,6 +33,8 @@
 - `process_read_event()` / `process_write_event()` on a connection that is not initialized crashed in nats.c;
   they now throw `NATS_INVALID_ARG`.
 - `message::create()` rejects payloads over `INT_MAX` bytes instead of truncating the length.
+- Creating an async subscription could free its handler state while nats.c was already calling it if
+  allocating nats.c's reference to it failed; that allocation now happens before subscribing.
 - `message::create()` before any connection crashed when the message was destroyed: nats.c frees messages
   through its library state, which only opening a connection initialized. `create()` now opens the library.
 - **Use-after-free in async subscriptions.** Destroying, move-assigning or unsubscribing a `subscription`
