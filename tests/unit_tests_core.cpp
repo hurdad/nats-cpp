@@ -12,6 +12,7 @@
 #include <natscpp/library.hpp>
 #include <natscpp/message.hpp>
 #include <natscpp/trace.hpp>
+#include <natscpp/version.hpp>
 
 #include <cassert>
 #include <chrono>
@@ -21,6 +22,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -592,6 +594,21 @@ void test_message_binary_payload_with_null_bytes() {
 // library.hpp: basic runtime coverage
 // ---------------------------------------------------------------------------
 
+void test_natscpp_version_matches_cmake_project() {
+  static_assert(NATSCPP_VERSION_NUMBER ==
+                ((NATSCPP_VERSION_MAJOR << 16) | (NATSCPP_VERSION_MINOR << 8) | NATSCPP_VERSION_PATCH));
+  static_assert(natscpp::version_number() == NATSCPP_VERSION_NUMBER);
+  static_assert(std::string_view(natscpp::version()) == NATSCPP_VERSION_STRING);
+#ifdef NATSCPP_TEST_PROJECT_VERSION
+  static_assert(std::string_view(natscpp::version()) == NATSCPP_TEST_PROJECT_VERSION);
+#endif
+  // Encoded like nats.c's NATS_VERSION_NUMBER, so the two compare the same way.
+  const std::string expected = std::to_string(natscpp::version_number() >> 16U) + "." +
+                               std::to_string((natscpp::version_number() >> 8U) & 0xffU) + "." +
+                               std::to_string(natscpp::version_number() & 0xffU);
+  assert(expected == natscpp::version());
+}
+
 void test_library_version_and_time_functions() {
   // Version string is non-null and non-empty.
   const char* version = natscpp::nats_GetVersion();
@@ -781,6 +798,7 @@ void test_tls_option_setters_store_values() {
 std::vector<test_case> core_unit_tests() {
   return {
       NATSCPP_TEST_CASE("unit", test_throw_on_error_ok_does_not_throw),
+      NATSCPP_TEST_CASE("unit", test_natscpp_version_matches_cmake_project),
       NATSCPP_TEST_CASE("unit", test_tls_option_setters_store_values),
       NATSCPP_TEST_CASE("unit", test_throw_on_error_reports_status_and_context),
       NATSCPP_TEST_CASE("unit", test_throw_on_error_preserves_status_code),

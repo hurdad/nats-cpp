@@ -57,6 +57,8 @@
   parent project's cache.
 
 ### Added
+- `natscpp::version()` / `natscpp::version_number()` and `NATSCPP_VERSION_*` macros in `<natscpp/version.hpp>`
+  for natscpp's own version (the CMake project version is read from that header).
 - `js_pull_consumer::fetch(batch, timeout)` for batch pulls; `next()` now uses it.
 - `jetstream::subscribe_async(subject, durable, handler, manual_ack)`: callback-based push consumers.
 - `native_handle()` on `js_pull_consumer` and `js_push_consumer`.

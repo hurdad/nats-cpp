@@ -1,7 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 
+# The version lives in include/natscpp/version.hpp (natscpp::version()); read it from there so the two cannot differ.
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/include/natscpp/version.hpp" _natscpp_version_lines
+     REGEX "^#define NATSCPP_VERSION_(MAJOR|MINOR|PATCH) [0-9]+$")
+foreach(_part MAJOR MINOR PATCH)
+  string(REGEX MATCH "NATSCPP_VERSION_${_part} ([0-9]+)" _ "${_natscpp_version_lines}")
+  set(_natscpp_version_${_part} "${CMAKE_MATCH_1}")
+  if(_natscpp_version_${_part} STREQUAL "")
+    message(FATAL_ERROR "natscpp: NATSCPP_VERSION_${_part} not found in include/natscpp/version.hpp")
+  endif()
+endforeach()
+
 project(natscpp
-  VERSION 0.2.0
+  VERSION ${_natscpp_version_MAJOR}.${_natscpp_version_MINOR}.${_natscpp_version_PATCH}
   DESCRIPTION "Modern header-only C++20 wrapper for nats.c"
   LANGUAGES CXX)
 
@@ -218,6 +229,8 @@ if(NATSCPP_BUILD_TESTS)
     tests/unit_tests_security.cpp
   )
   target_link_libraries(natscpp_unit_tests PRIVATE natscpp::natscpp)
+  # Checked against natscpp::version() (the project version is read from version.hpp).
+  target_compile_definitions(natscpp_unit_tests PRIVATE NATSCPP_TEST_PROJECT_VERSION="${PROJECT_VERSION}")
   target_compile_options(natscpp_unit_tests PRIVATE ${_natscpp_warnings})
   if(OpenSSL_FOUND)
     target_link_libraries(natscpp_unit_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto)  # TLS test callback

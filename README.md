@@ -710,6 +710,21 @@ that call, which is a data race on the coroutine frame (ThreadSanitizer reports 
 
 ### Library utilities
 
+natscpp's own version, and the nats.c it was compiled against and runs with:
+
+```cpp
+#include <natscpp/version.hpp>  // also included by <natscpp/natscpp.hpp>
+#include <natscpp/library.hpp>
+
+const char* ver = natscpp::version();           // natscpp, e.g. "0.2.0"
+uint32_t    num = natscpp::version_number();    // 0x000200, encoded like NATS_VERSION_NUMBER
+const char* c_ver = natscpp::nats_GetVersion();         // nats.c at run time, e.g. "3.15.0"
+uint32_t    c_num = natscpp::nats_GetVersionNumber();   // 0x030F00
+```
+
+`NATSCPP_VERSION_MAJOR`, `_MINOR`, `_PATCH`, `_STRING` and `_NUMBER` give the same at compile time (nats.c's are
+`NATS_VERSION_STRING` and `NATS_VERSION_NUMBER`). The CMake project version is read from `version.hpp`.
+
 `library.hpp` exposes thin wrappers around global nats.c functions.
 
 ```cpp
@@ -799,6 +814,7 @@ they must not contain `"`, `\` or control characters.
 - `#include <natscpp/trace.hpp>`
 - `#include <natscpp/error.hpp>`
 - `#include <natscpp/library.hpp>`
+- `#include <natscpp/version.hpp>` (`natscpp::version()`, `NATSCPP_VERSION_*`)
 
 ## Development
 

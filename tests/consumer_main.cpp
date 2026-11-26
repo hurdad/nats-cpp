@@ -10,6 +10,7 @@ int main() {
     return 1;
   }
   const auto inbox = natscpp::connection::new_inbox();
-  std::printf("natscpp consumer OK: nats.c %s, inbox %s\n", natscpp::nats_GetVersion(), inbox.c_str());
+  std::printf("natscpp %s consumer OK: nats.c %s, inbox %s\n", natscpp::version(), natscpp::nats_GetVersion(),
+              inbox.c_str());
   return inbox.rfind("_INBOX.", 0) == 0 ? 0 : 1;
 }

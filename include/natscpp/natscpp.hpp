@@ -9,6 +9,7 @@
 #include <natscpp/message.hpp>
 #include <natscpp/subscription.hpp>
 #include <natscpp/trace.hpp>
+#include <natscpp/version.hpp>
 
 /**
  * @file natscpp.hpp
