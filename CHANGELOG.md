@@ -37,6 +37,10 @@
   `add_subdirectory` consumers, example runs, coverage thresholds, and test results on Codecov.
 
 ### Changed (may need code changes)
+- **nats.c 3.15.0 or newer is required** (the bundled version, and the recommended one). Support for older
+  nats.c is dropped: `auto` skips an older system `cnats` for the bundled one, `system` and the installed
+  natscpp package reject it, and the headers fail to compile against it. Distribution packages such as
+  Ubuntu's `libnats-dev` are usually older.
 - `connection::connected()` now reports whether the connection is up; it used to only report whether a handle
   existed (true even after `close()`).
 - `future_awaitable` is move-only. A copy could cancel the pending resume and hang the coroutine.

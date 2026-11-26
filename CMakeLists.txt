@@ -17,10 +17,13 @@ target_include_directories(natscpp
 
 set(NATS_C_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nats.c")
 
+# natscpp supports nats.c 3.15.0 and newer: the version bundled in third_party/nats.c.
+set(NATSCPP_NATS_C_MIN_VERSION 3.15.0)
+
 # nats.c backend selection:
-#   auto    — use a system-installed cnats if find_package succeeds; otherwise
+#   auto    — use a system-installed cnats if it is NATSCPP_NATS_C_MIN_VERSION or newer; otherwise
 #             fall back to the bundled third_party/nats.c submodule (default)
-#   system  — require a system-installed cnats; error if not found
+#   system  — require a system-installed cnats of at least NATSCPP_NATS_C_MIN_VERSION
 #   bundled — always use the bundled submodule; error if submodule is absent
 set(NATSCPP_NATS_BACKEND "auto" CACHE STRING
   "nats.c backend: auto | system | bundled")
@@ -64,11 +67,15 @@ if(NATSCPP_NATS_BACKEND STREQUAL "bundled")
   set(_natscpp_use_bundled ON)
 elseif(NATSCPP_NATS_BACKEND STREQUAL "system")
   set(_natscpp_use_bundled OFF)
-else()  # auto: prefer system, fall back to bundled
+else()  # auto: prefer a recent enough system nats.c, fall back to bundled
   find_package(cnats QUIET)
-  if(cnats_FOUND)
+  if(cnats_FOUND AND cnats_VERSION VERSION_GREATER_EQUAL NATSCPP_NATS_C_MIN_VERSION)
     set(_natscpp_use_bundled OFF)
-    message(STATUS "natscpp: system cnats found — using system nats.c")
+    message(STATUS "natscpp: system cnats ${cnats_VERSION} found — using system nats.c")
+  elseif(cnats_FOUND)
+    set(_natscpp_use_bundled ON)
+    message(STATUS "natscpp: system cnats ${cnats_VERSION} is older than ${NATSCPP_NATS_C_MIN_VERSION} — "
+                   "using bundled nats.c")
   else()
     set(_natscpp_use_bundled ON)
     message(STATUS "natscpp: system cnats not found — falling back to bundled nats.c")
@@ -128,6 +135,11 @@ else()
   # nats.c installs a cmake package named "cnats" for both shared and static
   # builds.  Prefer the shared target (cnats::nats); fall back to static.
   find_package(cnats REQUIRED)
+  if(cnats_VERSION VERSION_LESS NATSCPP_NATS_C_MIN_VERSION)
+    message(FATAL_ERROR "natscpp needs nats.c ${NATSCPP_NATS_C_MIN_VERSION} or newer, but the system cnats is "
+                        "${cnats_VERSION}. Use -DNATSCPP_NATS_BACKEND=bundled (or auto) to build the bundled "
+                        "nats.c, or install a newer one.")
+  endif()
   # A static cnats does not carry its OpenSSL dependency, so link it when present.
   set(NATSCPP_LINKS_OPENSSL ${OpenSSL_FOUND})
 

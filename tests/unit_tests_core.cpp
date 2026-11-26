@@ -652,7 +652,6 @@ void test_future_awaitable_destroyed_before_future_ready() {
   // No crash or sanitizer complaint = CAS guard is working.
 }
 
-#if NATS_VERSION_NUMBER >= 0x030A00
 int accept_all_verify_cb(int preverify_ok, void* /*x509_store_ctx*/) { return preverify_ok; }
 
 void test_ssl_verification_callback_setter_stores_pointer() {
@@ -695,7 +694,6 @@ void test_ssl_verification_callback_is_applied_before_customize_options() {
   }
   assert(!nc.connected());
 }
-#endif
 
 void test_customize_options_runs_last_and_propagates_exceptions() {
   struct sentinel {};
@@ -797,10 +795,8 @@ std::vector<test_case> core_unit_tests() {
       NATSCPP_TEST_CASE("unit", test_library_version_and_time_functions),
       NATSCPP_TEST_CASE("unit", test_future_awaitable_suspend_resumes_via_noop_handle),
       NATSCPP_TEST_CASE("unit", test_future_awaitable_destroyed_before_future_ready),
-#if NATS_VERSION_NUMBER >= 0x030A00
       NATSCPP_TEST_CASE("unit", test_ssl_verification_callback_setter_stores_pointer),
       NATSCPP_TEST_CASE("unit", test_ssl_verification_callback_is_applied_before_customize_options),
-#endif
       NATSCPP_TEST_CASE("unit", test_customize_options_runs_last_and_propagates_exceptions),
       NATSCPP_TEST_CASE("unit", test_moved_from_connection_subscribe_async_throws),
       NATSCPP_TEST_CASE("unit", test_kv_config_history_out_of_range_throws),

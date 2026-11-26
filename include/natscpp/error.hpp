@@ -5,6 +5,11 @@
 #include <stdexcept>
 #include <string>
 
+// natscpp supports nats.c 3.15.0 and newer (the version bundled in third_party/nats.c).
+static_assert(NATS_VERSION_NUMBER >= 0x030F00,
+              "natscpp requires nats.c 3.15.0 or newer; build with the bundled third_party/nats.c "
+              "(-DNATSCPP_NATS_BACKEND=bundled) or install a newer nats.c");
+
 namespace natscpp {
 
 /**

@@ -65,7 +65,6 @@ struct connection_options {
   std::optional<std::string> expected_hostname;  // TLS SNI override
   std::optional<std::string> ciphers;
   std::optional<std::string> cipher_suites;
-#if NATS_VERSION_NUMBER >= 0x030A00  // natsOptions_SetSSLVerificationCallback: nats.c >= 3.10.0 (EXPERIMENTAL)
   // Custom OpenSSL verify callback, called as cb(preverify_ok, X509_STORE_CTX*) for each certificate in the
   // server's chain. It replaces nats.c's own verify callback: return preverify_ok to keep normal chain
   // verification, or 0 to reject. Use it to add checks on top of chain verification (e.g. pin the issuing CA).
@@ -74,7 +73,6 @@ struct connection_options {
   // even if skip_server_verification is true (nats.c clears the callback on skip and re-enables verification
   // on set). Throws NATS_ILLEGAL_STATE on connect() if nats.c was built without TLS.
   std::optional<natsSSLVerifyCb> ssl_verification_callback;
-#endif
 
   // --- Escape hatch ---
   // Called with the natsOptions last, after every other option has been applied, just before connecting.
@@ -161,9 +159,7 @@ struct connection_options {
   void set_expected_hostname(std::string hostname) { expected_hostname = std::move(hostname); }
   void set_ciphers(std::string c) { ciphers = std::move(c); }
   void set_cipher_suites(std::string c) { cipher_suites = std::move(c); }
-#if NATS_VERSION_NUMBER >= 0x030A00
   void set_ssl_verification_callback(natsSSLVerifyCb cb) { ssl_verification_callback = cb; }
-#endif
   void set_customize_options(std::function<void(natsOptions*)> fn) { customize_options = std::move(fn); }
 
   void set_closed_cb(std::function<void(natsConnection*)> cb) { closed_cb = std::move(cb); }
@@ -760,14 +756,12 @@ class connection {
       throw nats_error(NATS_ILLEGAL_STATE, "natsOptions_SetCipherSuites: NATS_HAS_TLS not defined");
 #endif
     }
-#if NATS_VERSION_NUMBER >= 0x030A00
     // Must come after SkipServerVerification: skip(true) clears the callback, and setting one re-enables
     // verification. A nats.c built without TLS returns NATS_ILLEGAL_STATE here.
     if (options.ssl_verification_callback) {
       throw_on_error(::natsOptions_SetSSLVerificationCallback(nopts, *options.ssl_verification_callback),
                      "natsOptions_SetSSLVerificationCallback");
     }
-#endif
 
     // Callbacks
     throw_on_error(::natsOptions_SetClosedCB(nopts, &closed_cb_bridge, handlers), "natsOptions_SetClosedCB");

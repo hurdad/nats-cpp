@@ -136,7 +136,6 @@ void test_tls_chain_verification_and_issuer_pinning() {
     assert(connects(o));
   }
 
-#if NATS_VERSION_NUMBER >= 0x030A00
   X509* int_a = load_cert(dir + "/intA.pem");
   X509* int_b = load_cert(dir + "/intB.pem");
 
@@ -176,7 +175,6 @@ void test_tls_chain_verification_and_issuer_pinning() {
   g_pinned_issuer = nullptr;
   X509_free(int_a);
   X509_free(int_b);
-#endif
 }
 #endif  // NATSCPP_TEST_TLS
 

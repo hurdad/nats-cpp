@@ -17,6 +17,12 @@ endif()
 find_dependency(cnats REQUIRED
   HINTS "${PACKAGE_PREFIX_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/cnats"
         "${CMAKE_CURRENT_LIST_DIR}/../cnats")
+if(cnats_VERSION VERSION_LESS "@NATSCPP_NATS_C_MIN_VERSION@")
+  set(natscpp_FOUND FALSE)
+  set(natscpp_NOT_FOUND_MESSAGE
+      "natscpp needs nats.c @NATSCPP_NATS_C_MIN_VERSION@ or newer, but found cnats ${cnats_VERSION}")
+  return()
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/natscppTargets.cmake")
 

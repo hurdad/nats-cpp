@@ -9,6 +9,7 @@ client: core NATS, JetStream and KeyValue, with RAII handles and sync, callback 
 ## Table of contents
 
 - [Features](#features)
+- [Compatibility](#compatibility)
 - [Requirements](#requirements)
 - [Build and test](#build-and-test)
 - [Install](#install)
@@ -48,16 +49,27 @@ client: core NATS, JetStream and KeyValue, with RAII handles and sync, callback 
 - KeyValue wrappers (open bucket, put/get/delete entries, watch key updates).
 - Trace propagation helpers using NATS headers (`TraceCarrier` concept).
 
+## Compatibility
+
+| natscpp | nats.c | C++ | Tested against nats-server |
+|---|---|---|---|
+| 0.2.0 | **3.15.0** or newer (3.15.0 bundled and recommended) | C++20, C++23 | 2.10.22 |
+
+Each natscpp release supports the nats.c version bundled in `third_party/nats.c` and newer; older nats.c is
+rejected at configure and compile time. Use the bundled copy (the default when no suitable system nats.c is
+installed) unless you have a reason not to.
+
 ## Requirements
 
 - C++20 or C++23 compiler. CI builds with GCC as C++20 and C++23 and with Clang as C++23; the library only
   needs C++20, and a project compiling as C++23 can use it unchanged.
 - CMake 3.20+
-- `nats.c` dependency, resolved in one of two ways:
-  - bundled submodule at `third_party/nats.c` (static build wired automatically by CMake), or
-  - system install that provides the `cnats` CMake package (e.g. Debian/Ubuntu `libnats-dev`, or nats.c's own
-    `cmake --install`), found with `find_package(cnats)`; add its prefix to `CMAKE_PREFIX_PATH` if it is not in a
-    standard location
+- **nats.c 3.15.0 or newer.** natscpp supports only current nats.c; 3.15.0 is the version it is tested with and
+  the recommended one. It is bundled as the `third_party/nats.c` submodule (`git submodule update --init`),
+  which CMake builds automatically. A system install also works if it provides the `cnats` CMake package at
+  3.15.0 or newer (e.g. nats.c's own `cmake --install`; add its prefix to `CMAKE_PREFIX_PATH`). Distribution
+  packages such as Debian/Ubuntu `libnats-dev` are usually older and are not supported. Building against an
+  older nats.c fails at compile time with a message saying so.
 
 ## Build and test
 
@@ -98,17 +110,16 @@ Build options:
 
 Use `-DCMAKE_CXX_STANDARD=23` to build the tests and examples as C++23.
 
-`NATSCPP_NATS_BACKEND` picks the nats.c source: `auto` (default) uses a system `cnats` package if one is found and
-otherwise falls back to the bundled submodule, `system` requires the system package, and `bundled` always uses the
-submodule. With `auto`, if `third_party/nats.c` is not initialized and no `cnats` package is found, configure fails.
+`NATSCPP_NATS_BACKEND` picks the nats.c source: `auto` (default) uses a system `cnats` package if it is 3.15.0 or
+newer and otherwise falls back to the bundled submodule (saying why), `system` requires a system package of at
+least 3.15.0, and `bundled` always uses the submodule. With `auto`, if `third_party/nats.c` is not initialized and
+no suitable `cnats` package is found, configure fails.
 
 TLS: the bundled submodule is built with TLS when OpenSSL is found (`NATSCPP_BUNDLED_WITH_TLS`, default ON if
-OpenSSL is available; set it OFF to build without). A system nats.c has whatever TLS support it was built with;
-`libnats-dev` includes it:
+OpenSSL is available; set it OFF to build without). A system nats.c has whatever TLS support it was built with:
 
 ```bash
-sudo apt install libnats-dev
-cmake -S . -B build -DNATSCPP_NATS_BACKEND=system
+cmake -S . -B build -DNATSCPP_NATS_BACKEND=system -DCMAKE_PREFIX_PATH=/opt/nats.c   # nats.c >= 3.15.0
 ```
 
 Without TLS in nats.c, TLS options (including `ssl_verification_callback`) make `connect()` throw `NATS_ILLEGAL_STATE`.
@@ -253,7 +264,7 @@ builds its own tests and examples with `-Wno-missing-field-initializers`; do the
 | `certificates_chain_file` + `private_key_file` / `load_certificates_chain()` | Client cert + key |
 | `skip_server_verification` / `set_skip_server_verification()` | Turn off **all** server certificate verification (testing only) |
 | `expected_hostname` / `set_expected_hostname()` | TLS SNI override |
-| `ssl_verification_callback` / `set_ssl_verification_callback()` | Custom OpenSSL verify callback (nats.c ≥ 3.10, EXPERIMENTAL there) |
+| `ssl_verification_callback` / `set_ssl_verification_callback()` | Custom OpenSSL verify callback (marked EXPERIMENTAL in nats.c) |
 
 Since nats.c 3.15.0, setting any TLS option (CA, client certificate, ciphers, expected hostname, verification
 callback, skip verification) makes the client require TLS: connecting to a plaintext server fails with
@@ -265,8 +276,7 @@ URLs with `NATS_INVALID_ARG`.
 where `ctx` is an `X509_STORE_CTX*`). nats.c passes no user-data pointer, so any state the callback needs must be
 global/static. It replaces nats.c's own verify callback, so return `0` when `preverify_ok` is `0` to keep normal
 chain verification. It is applied after the other TLS options: setting it turns server verification back on even
-if `skip_server_verification` is `true`. The field only exists when building against nats.c 3.10.0 or newer
-(`NATS_VERSION_NUMBER >= 0x030A00`). With a nats.c built without TLS, `connect()` throws `NATS_ILLEGAL_STATE`.
+if `skip_server_verification` is `true`. With a nats.c built without TLS, `connect()` throws `NATS_ILLEGAL_STATE`.
 
 Example: accept the server only if its certificate was issued by one specific intermediate CA:
 
