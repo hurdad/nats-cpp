@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0
+## 0.2.0 — 2026-11-26
 
 ### Security
 - **NATS protocol injection through subjects.** nats.c checks subjects when subscribing but not when
